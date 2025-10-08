@@ -6,8 +6,10 @@ As the chip dataset is large, and redunant computations - such as sorting cells 
 and caches data for each dataset, that remain consistent throughout several runs.
 """
 
+from Cell_Via_Utilities import find_representative_vias
 from collections import Counter, defaultdict
 from Annotation_Helpers import *
+from multiprocessing import Pool
 from pathlib import Path
 import warnings
 import pickle
@@ -32,8 +34,10 @@ class DataCache:
     def update_all(self) -> None:
         start = time.perf_counter()
         self.update_sorted_cells()
-        self.update_representatives()
+        self.update_representatives(list(self.get_sorted_cells().keys()), cell_num=100)
         self.update_boxes()
+        warnings.warn("Used cell_num=100 for quicker update. Consider treating these representatives as a draft. \n" \
+            "Update representatives with higher cell_num for better accuracies.", UserWarning)
         print(f"Updating took {time.perf_counter() - start:.4f} seconds")
 
     def update_sorted_cells(self) -> None:
@@ -53,14 +57,20 @@ class DataCache:
         self._cache_sorted_cells(sorted_cells)
         print("Updating done.")
 
-    def update_representatives(self) -> None:
+    def update_representatives(self, cell_types: list[str], cell_num: int = 1000, replace: bool = False, reset: bool = False) -> None:
         print("Updating representatives...")
-        warnings.warn("Updating representatives is not implemented yet.", UserWarning)
-        # TODO: Implement representatives
+        representatives = {} if reset else self.get_representatives()
+        cell_types = cell_types if replace else [cell_type for cell_type in cell_types if cell_type not in representatives]
 
-        new_reps: dict[str, list[tuple[float, float]]] = self.get_representatives()
-
-        self._cache_representatives(new_reps)
+        sorted_cells = self.get_sorted_cells()
+        if cell_types:
+            with Pool() as pool:
+                new_reps = pool.starmap(find_representative_vias, [(sorted_cells[cell_type], cell_num) for cell_type in cell_types])
+            new_representatives = dict(zip(cell_types, new_reps))
+        else: new_representatives = {}
+        
+        representatives.update(new_representatives)
+        self._cache_representatives(representatives)
         print("Updating done.")
 
     def update_boxes(self) -> None:
