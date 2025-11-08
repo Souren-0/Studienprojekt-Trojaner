@@ -47,14 +47,17 @@ def hausdorff(points1: ArrayLike, points2: ArrayLike, box: Optional[tuple[float,
     return _hausdorff(points1, points2) / norm
 
 
-def chamfer(points1: ArrayLike, points2: ArrayLike, box: Optional[tuple[float, float]] = None) -> float:
+def chamfer(points1: ArrayLike, points2: ArrayLike, box: Optional[tuple[float, float]] = None, directed: bool = True) -> float:
     norm = _box_diagonal(*box) if box else 1
 
     dist = torch.cdist(
         torch.tensor(points1, dtype=torch.float32).unsqueeze(0),
         torch.tensor(points2, dtype=torch.float32).unsqueeze(0))
     
-    chamfer = (dist.min(2)[0].mean() + dist.min(1)[0].mean()) / 2
+    if directed:
+        chamfer = dist.min(2)[0].mean() 
+    else:
+        chamfer = (dist.min(2)[0].mean() + dist.min(1)[0].mean()) / 2 
     return chamfer.item() / norm
 
 

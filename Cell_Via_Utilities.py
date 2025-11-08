@@ -7,12 +7,13 @@ This module contains functions for manipulating and aligning cell structures, in
 """
 
 import math
+import warnings
 import numpy as np
 from tqdm import tqdm
 from copy import deepcopy
 from collections import Counter
 from Annotation_Helpers import *
-from typing import Iterable, Optional
+from typing import Callable, Iterable, Optional
 
 from sklearn.cluster import KMeans
 from scipy.stats import rayleigh
@@ -80,44 +81,50 @@ def reset_transform(cell : Cell, powerline_direction : str = 'y') -> Cell:
     return cell
 
 
-def score_matching(pts1 : list[Point], pts2 : list[Point]) -> float:
-    """Try to match the set of points 1 to points 2. The points of set 1 are matched to the closest
-    point in set 2. The resulting score is the sum of the distances"""
-
-    min_dists = []
-    for p1 in pts1:
-        dists = [euk_dist_sq(p1, p2) for p2 in pts2]
-        min_dists.append(min(dists))
-    return sum(min_dists)
-
-
 def align_to_point(vias : list[Point], point : Point) -> list[Point]:
     return [diff_pts(point, v) for v in vias]
 
 
-def align_cells(cell1_vias : list[Point], cell2_vias : list[Point], itr_count: Optional[int] = 5) -> tuple[list[Point], list[Point]]:
+def align_vias(cell1_vias : list[Point], cell2_vias : list[Point], itr_count: Optional[int] = 5) -> tuple[list[Point], list[Point]]:
     """ Given to sets of vias (points) try to align them as well as possible. For the optimal results all points
     would have to be tested but in all cases 5 works well enough. To use all points set itr_count to `None`."""
     if not (cell1_vias and cell2_vias): return cell1_vias, cell2_vias
     cell1, cell2 = deepcopy(cell1_vias), deepcopy(cell2_vias)
     min_scores = []
-    
-    for p1 in cell1[:itr_count]:
-        # Set the chosen via in cell1 to (0, 0).
-        p1_aligned_cell1 = align_to_point(cell1, p1)
 
-        # Make a list where every point in cell2 is aligned to (0, 0) once.
-        alignments_p2 = [(p2, align_to_point(cell2, p2)) for p2 in cell2]
+    # Align itr_count points to (0, 0)
+    alignments_p1 = [(p1, align_to_point(cell1, p1)) for p1 in cell1[:itr_count]]
 
+    # Make a list where every point in cell2 is aligned to (0, 0) once.
+    alignments_p2 = [(p2, align_to_point(cell2, p2)) for p2 in cell2]
+
+    for p1, p1_aligned in alignments_p1:
         # Score all the alignments bettween cell1 and cell2
-        p1_points = KDTree(p1_aligned_cell1)
+        p1_points = KDTree(p1_aligned)
         fitting_scores = [(p1, p2, sum(p1_points.query(p2_points)[0])) for p2, p2_points in alignments_p2]
-
         min_scores.append(min(fitting_scores, key = lambda x : x[2]))
+
     p1_alignment, p2_alignment, score = min(min_scores, key = lambda x : x[2])
     aligned_cell1, aligned_cell2 = [diff_pts(p1, p1_alignment) for p1 in cell1], [diff_pts(p2, p2_alignment) for p2 in cell2]
     aligned_cell1, aligned_cell2 = [add_pts(p1, p2_alignment) for p1 in aligned_cell1], [add_pts(p2, p1_alignment) for p2 in aligned_cell2]
     return aligned_cell1, aligned_cell2
+
+
+def align_all_cells(cells: list[Cell],
+                    vias: list[Point] | None,
+                    itr_count: int = 50,
+                    distance_measure: Callable[[list[Point], list[Point]], float] = chamfer) -> tuple[list[Cell], list[float]]:
+    cells = deepcopy(cells)
+    # Set vias to a draft representative
+    vias = vias if vias else find_representative_vias(cells, num_cells=100, alignment_itr=10, filter_itr=1)
+    aligned_cells = []
+    for cell in tqdm(cells):
+        cell["vias"] = align_vias(cell["vias"], vias, itr_count=itr_count)[0]
+        if cell["vias"]: aligned_cells.append((cell, distance_measure(cell["vias"], vias)))
+        else: warnings.warn("Cannot compute distance of cells with no vias, ignoring cell...")
+
+    cells_aligned, distances = zip(*aligned_cells) if aligned_cells else ([], [])
+    return list(cells_aligned), list(distances)
 
 
 def get_aligned_vias(cells: Iterable[Cell],
@@ -148,9 +155,9 @@ def get_aligned_vias(cells: Iterable[Cell],
 
     if multiprocess:
         with Pool() as pool:
-            results = pool.starmap(align_cells, [(start_cell["vias"], cell["vias"], alignment_itr) for cell in cells[:num_cells]])
+            results = pool.starmap(align_vias, [(start_cell["vias"], cell["vias"], alignment_itr) for cell in cells[:num_cells]])
     else:
-        results = [align_cells(start_cell["vias"], cell["vias"], itr_count=alignment_itr) for cell in tqdm(cells[:num_cells], desc=cell_type)]
+        results = [align_vias(start_cell["vias"], cell["vias"], itr_count=alignment_itr) for cell in tqdm(cells[:num_cells], desc=cell_type)]
 
     for _, vias_p2 in results:
         all_vias += vias_p2
@@ -158,8 +165,10 @@ def get_aligned_vias(cells: Iterable[Cell],
 
 
 def find_representative_vias(cells: Iterable[Cell],
-                             num_cells : Optional[int] = 1000,
-                             alignment_itr : Optional[int] = 50,
+                             num_cells : int = 1000,
+                             alignment_itr : int = 50,
+                             filter_itr: int = 2,
+                             filter_threshold = 0.995,
                              plot: bool = False,
                              multiprocess: bool = False) -> list[Point]:
     via_count, cell_vias = get_aligned_vias(cells, num_cells=num_cells, alignment_itr=alignment_itr, multiprocess=multiprocess)
@@ -175,7 +184,7 @@ def find_representative_vias(cells: Iterable[Cell],
         kmeans = KMeans(n_clusters=via_count)
         kmeans.fit(cell_vias)
         # Remove outliers using confidence intervals
-        for _ in range(2):
+        for _ in range(filter_itr):
             # Compute the distances from each point to their label point
             distances = np.linalg.norm(filtered_vias - kmeans.cluster_centers_[kmeans.labels_], axis=1)
 
@@ -184,8 +193,7 @@ def find_representative_vias(cells: Iterable[Cell],
             loc, scale = rayleigh.fit(distances + np.finfo(float).eps) # Avoids divison by 0 when a distance is 0
             
             # Filter points outside of threshold. Filter option can be adapted
-            threshold = 0.99
-            filtered_vias = filtered_vias[distances < rayleigh.ppf(threshold, loc=loc, scale=scale)] 
+            filtered_vias = filtered_vias[distances < rayleigh.ppf(filter_threshold, loc=loc, scale=scale)] 
             kmeans.fit(filtered_vias)
         representative = [tuple(pt) for pt in kmeans.cluster_centers_]
     
@@ -197,7 +205,25 @@ def find_representative_vias(cells: Iterable[Cell],
 
 
 def assign_cell_type(cell: Cell, representatives: dict[str, list[Point]]) -> str:
-    #TODO: Align cells with reps first
     cell_vias = cell["vias"]
-    dists = [(representative, chamfer(cell_vias, representatives[representative])) for representative in representatives]
+    dists = []
+    for representative, vias in representatives.items():
+        aligned_cell = align_vias(cell_vias, vias, itr_count=None)[0]
+        dists.append((representative, chamfer(aligned_cell, vias)))
     return min(dists, key=lambda x: x[1])[0]
+
+
+def check_cells_for_trojan(cells, dists, confidence_threshold=0.9999):
+    if cells and dists:
+        cells, dists = np.array(cells), np.array(dists)
+        loc, scale = rayleigh.fit(dists)
+        cells = cells[dists > rayleigh.ppf(confidence_threshold, loc=loc, scale=scale)]
+    else:
+        cells = []
+    return list(cells)
+
+
+def sort_cells(cells, dists, top_x: int = 3):
+    top_index = np.argsort(dists)[-top_x:]
+    cells = np.array(cells)
+    return list(cells[top_index])

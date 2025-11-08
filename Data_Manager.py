@@ -6,11 +6,12 @@ As the chip dataset is large, and redunant computations - such as sorting cells 
 and caches data for each dataset, that remain consistent throughout several runs.
 """
 
-from Cell_Via_Utilities import find_representative_vias
 from collections import Counter, defaultdict
 from Annotation_Helpers import *
+from Cell_Via_Utilities import *
 from multiprocessing import Pool
 from pathlib import Path
+from copy import deepcopy
 import warnings
 import pickle
 import time
@@ -28,14 +29,16 @@ class DataCache:
         self.sorted_cells = self._retrieve_sorted_cells()
         self.representatives = self._retrieve_representatives()
         self.boxes = self._retrieve_boxes()
+        self.aligned_cells = self._retrieve_aligned_cells()
         print(f"Retrieving took {time.perf_counter() - start:.4f} seconds")
 
     # -------- Public API --------
     def update_all(self) -> None:
         start = time.perf_counter()
         self.update_sorted_cells()
-        self.update_representatives(list(self.get_sorted_cells().keys()), cell_num=100)
         self.update_boxes()
+        self.update_representatives(list(self.get_sorted_cells().keys()), cell_num=100)
+        self.update_aligned_cells(list(self.get_sorted_cells().keys()))
         warnings.warn("Used cell_num=100 for quicker update. Consider treating these representatives as a draft. \n" \
             "Update representatives with higher cell_num for better accuracies.", UserWarning)
         print(f"Updating took {time.perf_counter() - start:.4f} seconds")
@@ -57,7 +60,7 @@ class DataCache:
         self._cache_sorted_cells(sorted_cells)
         print("Updating done.")
 
-    def update_representatives(self, cell_types: list[str], cell_num: int = 1000, replace: bool = False, reset: bool = False) -> None:
+    def update_representatives(self, cell_types: list[str], cell_num: Optional[int] = 1000, replace: bool = False, reset: bool = False) -> None:
         print("Updating representatives...")
         representatives = {} if reset else self.get_representatives()
         cell_types = cell_types if replace else [cell_type for cell_type in cell_types if cell_type not in representatives]
@@ -92,15 +95,21 @@ class DataCache:
         self._cache_boxes(cell_box)
         print("Updating done.")
 
+    def update_aligned_cells(self, cell_types: list[str], cell_num: Optional[int] = None, replace: bool = False, reset: bool = False) -> None:
+        print("Updating aligned cells...")
+        aligned_cells = {} if reset else self.get_aligned_cells()
+        cell_types = cell_types if replace else [cell_type for cell_type in cell_types if cell_type not in aligned_cells]
 
-    def get_sorted_cells(self) -> dict[str, list[Cell]]:
-        return self.sorted_cells
-    
-    def get_representatives(self) -> dict[str, list[tuple[float, float]]]:
-        return self.representatives
-    
-    def get_boxes(self) -> dict[str, tuple[float, float]]:
-        return self.boxes
+        new_cells = {cell_type : 
+                         align_all_cells(
+                             self.get_sorted_cells().get(cell_type, [])[:cell_num],
+                             self.get_representatives().get(cell_type, None)
+                            )
+                        for cell_type in cell_types}
+        
+        aligned_cells.update(new_cells)
+        self._cache_aligned_cells(aligned_cells)
+        print("Updating done")
 
 
     def group_cells(self, cell_mapping: dict[str, str]) -> None:
@@ -114,55 +123,36 @@ class DataCache:
         self._cache_sorted_cells(grouped_cells)
 
 
+    def get_sorted_cells(self) -> dict[str, list[Cell]]: return self.sorted_cells
+    def get_representatives(self) -> dict[str, list[tuple[float, float]]]: return self.representatives
+    def get_boxes(self) -> dict[str, tuple[float, float]]: return self.boxes
+    def get_aligned_cells(self) -> dict[str, tuple[list[Cell], list[float]]]: return self.aligned_cells
+
+
     # -------- Private functions --------
-    def _retrieve_sorted_cells(self) -> dict[str, list[Cell]]:
-        print("Retrieving sorted cells.")
-        path = self.cache_dir / "sorted_cells.pickle"
+    def _retrieve_cache(self, name: str) -> dict:
+        print(f"Retrieving {name.replace('_', ' ')}")
+        path = self.cache_dir / f"{name}.pickle"
         if path.exists():
             with open(path, "rb") as f:
                 return pickle.load(f)
-            
-        warnings.warn("No data is cached. Call 'update_sorted_cells()' to cache.", UserWarning)
+        warnings.warn(f"No data is cached. Call 'update_{name}()' to cache.", UserWarning)
         return {}
 
-    def _retrieve_representatives(self) -> dict[str, list[tuple[float, float]]]:
-        print("Retrieving representatives.")
-        path = self.cache_dir / "representatives.pickle"
-        if path.exists():
-            with open(path, "rb") as f:
-                return pickle.load(f)
-            
-        warnings.warn("No data is cached. Call 'update_representatives()' to cache.", UserWarning)
-        return {}
-
-    def _retrieve_boxes(self) -> dict[str, tuple[float, float]]:
-        print("Retrieving boxes.")
-        path = self.cache_dir / "boxes.pickle"
-        if path.exists():
-            with open(path, "rb") as f:
-                return pickle.load(f)
-            
-        warnings.warn("No data is cached. Call 'update_boxes()' to cache.", UserWarning)
-        return {}
+    def _retrieve_sorted_cells(self): return self._retrieve_cache("sorted_cells")
+    def _retrieve_representatives(self): return self._retrieve_cache("representatives")
+    def _retrieve_boxes(self): return self._retrieve_cache("boxes")
+    def _retrieve_aligned_cells(self): return self._retrieve_cache("aligned_cells")
 
 
-    def _cache_sorted_cells(self, new_cells: dict[str, list[Cell]]) -> None:
-        print("Saving new cells")
-        self.sorted_cells = new_cells
-        path = self.cache_dir / "sorted_cells.pickle"
+    def _cache_data(self, name: str, data: dict) -> None:
+        print(f"Saving new {name.replace('_', ' ')}")
+        setattr(self, name, data)
+        path = self.cache_dir / f"{name}.pickle"
         with open(path, "wb") as f:
-            pickle.dump(new_cells, f)
+            pickle.dump(data, f)
 
-    def _cache_representatives(self, new_reps: dict[str, list[tuple[float, float]]]) -> None:
-        print("Saving new representatives")
-        self.representatives = new_reps
-        path = self.cache_dir / "representatives.pickle"
-        with open(path, "wb") as f:
-            pickle.dump(new_reps, f)
-
-    def _cache_boxes(self, new_boxes: dict[str, tuple[float, float]]) -> None:
-        print("Saving new boxes")
-        self.boxes = new_boxes
-        path = self.cache_dir / "boxes.pickle"
-        with open(path, "wb") as f:
-            pickle.dump(new_boxes, f)
+    def _cache_sorted_cells(self, new_cells): self._cache_data("sorted_cells", new_cells)
+    def _cache_representatives(self, new_reps): self._cache_data("representatives", new_reps)
+    def _cache_boxes(self, new_boxes): self._cache_data("boxes", new_boxes)
+    def _cache_aligned_cells(self, new_cells): self._cache_data("aligned_cells", new_cells)
