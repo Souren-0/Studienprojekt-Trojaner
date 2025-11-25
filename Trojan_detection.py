@@ -1,4 +1,5 @@
 # from collections import defaultdict, Counter
+import pandas as pd
 from matplotlib import pyplot as plt
 # from Visualizer import Visualizer
 from pprint import pprint
@@ -6,7 +7,7 @@ from pprint import pprint
 import statistics
 from Data_Manager import *
 from Cell_Via_Utilities import *
-
+from collections import Counter
 
 # Benutze Sphinx für Dokumentation
 # Rigit registration für alignment
@@ -16,20 +17,64 @@ DATASETS = {
 }
 
 
+def check_efficiency(function, args):
+    start = time.perf_counter()
+    ret = function(*args)
+    print(f"Time: {time.perf_counter() - start :.4f} seconds.")
+    return ret
+
+
+def data_overview(sorted_cells):
+    rows = []
+    for cell_type, cells in sorted_cells.items():
+        cell_vias = [len(cell["vias"]) for cell in cells]
+        majority_vias = Counter(cell_vias).most_common(1)[0][0]
+        rows.append({
+            "type": cell_type,
+            "amount": len(cells),
+            "vias": majority_vias,
+            "total_vias" : len(cells) * majority_vias
+        })
+    return pd.DataFrame(rows)
+
+
+def get_mapping(dataset="28nm"):
+    with open("./Data/Cell_Mapping.pickle", "rb") as f:
+        data = pickle.load(f)
+    return data[dataset]
+
+
 if __name__ == "__main__":
     dataset = "28nm_chip"
     chip_data_file = DATASETS[dataset]["path"]
-
     cache = DataCache(chip_data_file)
 
     sorted_cells = cache.get_sorted_cells()
-    aligned_cells = cache.get_aligned_cells()
     cell_types = list(sorted_cells.keys())
     boxes = cache.get_boxes()
+    aligned_cells = cache.get_aligned_cells()
     representatives = cache.get_representatives()
 
-    print(len(sorted_cells))
-    print(len(boxes), len(representatives))
+    print(
+f"""Cell types: {len(sorted_cells)}
+Total Boxes: {len(boxes)}
+Total Representatives: {len(representatives)}
+Total aligned cells: {len(aligned_cells)}""")
+
+    # df = data_overview(sorted_cells)
+    # df = df.sort_values("total_vias", ascending=False)
+    # print(df[:10])
+
+    cell_type = "BLS"
+    aligned, dists = check_efficiency(align_all_cells, (sorted_cells[cell_type], representatives[cell_type]))
+    # v = Visualizer(boxes[cell_type], aligned, representatives[cell_type])
+    # v.display_all()
+    dists = np.array(dists)
+    print("min:", dists.min())
+    print("max:", dists.max())
+    print("mean:", dists.mean())
+    print("median:", np.median(dists))
+    # cache.update_representatives(cell_types, replace=True, reset=True)
     # print("BIW:", len(sorted_cells["BIW"]))
     # print("BDA:", len(sorted_cells["BDA"]))
     # print("GU:", len(sorted_cells["GU"]))
@@ -153,7 +198,19 @@ if __name__ == "__main__":
     # print(f"Finding a representative took {time.perf_counter() - start:.4f} seconds.")
 
     # cache.update_aligned_cells(["BLG", "BKK"])
-    for cell_type in aligned_cells:
-        trojans = sort_cells(*aligned_cells[cell_type])
-        v = Visualizer(boxes[cell_type], trojans, representatives[cell_type])
-        v.display_all()
+    # for cell_type in aligned_cells:
+    #     trojans = sort_cells(*aligned_cells[cell_type])
+    #     v = Visualizer(boxes[cell_type], trojans, representatives[cell_type])
+    #     v.display_all()
+
+    # cell_type = "BLS"
+    # cache.update_aligned_cells([cell_type])
+    # cache.update_aligned_cells([cell_type], replace=True)
+    # trojans = check_cells_for_trojan(*aligned_cells[cell_type])
+    # print(len(sorted_cells[cell_type]))
+    # print(len(trojans))
+    # v = Visualizer(boxes[cell_type], trojans, representatives[cell_type])
+    # v.display_all()
+    # print(len(sorted_cells[cell_type]))
+
+# BLS

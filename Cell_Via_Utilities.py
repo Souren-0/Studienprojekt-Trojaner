@@ -7,6 +7,7 @@ This module contains functions for manipulating and aligning cell structures, in
 """
 
 import math
+import random
 import warnings
 import numpy as np
 from tqdm import tqdm
@@ -110,6 +111,34 @@ def align_vias(cell1_vias : list[Point], cell2_vias : list[Point], itr_count: Op
     return aligned_cell1, aligned_cell2
 
 
+def align_vias_efficient(cell1_vias : list[Point], cell2_vias : list[Point], itr_count: Optional[int] = 5) -> tuple[list[Point], list[Point]]:
+    """ Given to sets of vias (points) try to align them as well as possible. For the optimal results all points
+    would have to be tested but in all cases 5 works well enough. To use all points set itr_count to `None`."""
+    if not (cell1_vias and cell2_vias): return cell1_vias, cell2_vias
+    cell1_vias, cell2_vias = np.array(deepcopy(cell1_vias)), np.array(deepcopy(cell2_vias)) #type: ignore
+    
+    # Align each point to (0,0) once
+    itr_count = len(cell1_vias) if itr_count == None else min(itr_count, len(cell1_vias))
+    alignments_p1 = np.array([(p1, align_to_point(cell1_vias, p1)) for p1 in random.sample(list(cell1_vias), itr_count)], dtype=object)
+    alignments_p2 = np.array([align_to_point(cell2_vias, p2) for p2 in cell2_vias], dtype=object)
+    cell2_vias_KD = KDTree(cell2_vias)
+    min_scores = []
+
+    for p1, p1_aligned in alignments_p1:
+        # Score all the alignments bettween cell1 and cell2
+        p1_points = KDTree(p1_aligned)
+        TwoNN_p1 = cell2_vias_KD.query(p1, k=2)[1]
+        aligned_p2 = zip(cell2_vias[TwoNN_p1], alignments_p2[TwoNN_p1])
+
+        fitting_scores = [(p1, p2, sum(p1_points.query(p2_points)[0])) for p2, p2_points in aligned_p2]
+        min_scores.append(min(fitting_scores, key = lambda x : x[2]))
+
+    p1_alignment, p2_alignment, _ = min(min_scores, key = lambda x : x[2])
+    aligned_cell1, aligned_cell2 = [diff_pts(p1, p1_alignment) for p1 in cell1_vias], [diff_pts(p2, p2_alignment) for p2 in cell2_vias]
+    aligned_cell1, aligned_cell2 = [add_pts(p1, p2_alignment) for p1 in aligned_cell1], [add_pts(p2, p1_alignment) for p2 in aligned_cell2]
+    return aligned_cell1, aligned_cell2
+
+
 def align_all_cells(cells: list[Cell],
                     vias: list[Point] | None,
                     itr_count: int = 50,
@@ -119,7 +148,7 @@ def align_all_cells(cells: list[Cell],
     vias = vias if vias else find_representative_vias(cells, num_cells=100, alignment_itr=10, filter_itr=1)
     aligned_cells = []
     for cell in tqdm(cells):
-        cell["vias"] = align_vias(cell["vias"], vias, itr_count=itr_count)[0]
+        cell["vias"] = align_vias_efficient(cell["vias"], vias, itr_count=itr_count)[0]
         if cell["vias"]: aligned_cells.append((cell, distance_measure(cell["vias"], vias)))
         else: warnings.warn("Cannot compute distance of cells with no vias, ignoring cell...")
 
@@ -152,12 +181,14 @@ def get_aligned_vias(cells: Iterable[Cell],
 
     # Extract all aligned vias from the cells
     all_vias = deepcopy(start_cell["vias"])
-
+    
+    num_cells = len(cells) if num_cells == None else min(num_cells, len(cells))
+    args = [(start_cell["vias"], cell["vias"], alignment_itr) for cell in random.sample(cells, num_cells)]
     if multiprocess:
         with Pool() as pool:
-            results = pool.starmap(align_vias, [(start_cell["vias"], cell["vias"], alignment_itr) for cell in cells[:num_cells]])
+            results = pool.starmap(align_vias, args)
     else:
-        results = [align_vias(start_cell["vias"], cell["vias"], itr_count=alignment_itr) for cell in tqdm(cells[:num_cells], desc=cell_type)]
+        results = [align_vias(*arg) for arg in tqdm(args, desc=cell_type)]
 
     for _, vias_p2 in results:
         all_vias += vias_p2
@@ -223,7 +254,7 @@ def check_cells_for_trojan(cells, dists, confidence_threshold=0.9999):
     return list(cells)
 
 
-def sort_cells(cells, dists, top_x: int = 3):
-    top_index = np.argsort(dists)[-top_x:]
-    cells = np.array(cells)
-    return list(cells[top_index])
+# def sort_cells(cells, dists, top_x: int = 3):
+#     top_index = np.argsort(dists)[-top_x:]
+#     cells = np.array(cells)
+#     return list(cells[top_index])

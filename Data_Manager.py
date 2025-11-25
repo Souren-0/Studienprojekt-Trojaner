@@ -41,10 +41,11 @@ class DataCache:
         self.update_aligned_cells(list(self.get_sorted_cells().keys()))
         warnings.warn("Used cell_num=100 for quicker update. Consider treating these representatives as a draft. \n" \
             "Update representatives with higher cell_num for better accuracies.", UserWarning)
-        print(f"Updating took {time.perf_counter() - start:.4f} seconds")
+        print(f"Total update took {time.perf_counter() - start:.4f} seconds")
 
     def update_sorted_cells(self) -> None:
         print("Updating sorted cells...")
+        start = time.perf_counter()
         with open(self.data_path, "rb") as f:
             chip_data = pickle.load(f)
 
@@ -55,13 +56,14 @@ class DataCache:
 
         sorted_cells: dict[str, list[Cell]] = defaultdict(list)
         for cell in all_cells:
-            sorted_cells[cell["data"]["name"]].append(cell)
+            sorted_cells[cell["data"]["name"]].append(reset_transform(cell))
         
         self._cache_sorted_cells(sorted_cells)
-        print("Updating done.")
+        print(f"Updating done. Took {time.perf_counter() - start:.4f} seconds")
 
     def update_representatives(self, cell_types: list[str], cell_num: Optional[int] = 1000, replace: bool = False, reset: bool = False) -> None:
         print("Updating representatives...")
+        start = time.perf_counter()
         representatives = {} if reset else self.get_representatives()
         cell_types = cell_types if replace else [cell_type for cell_type in cell_types if cell_type not in representatives]
 
@@ -74,10 +76,11 @@ class DataCache:
         
         representatives.update(new_representatives)
         self._cache_representatives(representatives)
-        print("Updating done.")
+        print(f"Updating done. Took {time.perf_counter() - start:.4f} seconds")
 
     def update_boxes(self) -> None:
         print("Updating boxes...")
+        start = time.perf_counter()
         sorted_cells = self.get_sorted_cells()
         cell_boxes: dict[str, Counter[tuple[float, float]]] = defaultdict(Counter)
         cell_types = list(sorted_cells)
@@ -93,10 +96,11 @@ class DataCache:
             cell_box[cell_type] = (max(widths), max(heights))
 
         self._cache_boxes(cell_box)
-        print("Updating done.")
+        print(f"Updating done. Took {time.perf_counter() - start:.4f} seconds")
 
     def update_aligned_cells(self, cell_types: list[str], cell_num: Optional[int] = None, replace: bool = False, reset: bool = False) -> None:
         print("Updating aligned cells...")
+        start = time.perf_counter()
         aligned_cells = {} if reset else self.get_aligned_cells()
         cell_types = cell_types if replace else [cell_type for cell_type in cell_types if cell_type not in aligned_cells]
 
@@ -109,7 +113,7 @@ class DataCache:
         
         aligned_cells.update(new_cells)
         self._cache_aligned_cells(aligned_cells)
-        print("Updating done")
+        print(f"Updating done. Took {time.perf_counter() - start:.4f} seconds")
 
 
     def group_cells(self, cell_mapping: dict[str, str]) -> None:
