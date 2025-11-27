@@ -18,11 +18,27 @@ from typing import Callable, Iterable, Optional
 
 from sklearn.cluster import KMeans
 from scipy.stats import rayleigh
+from scipy.spatial import ConvexHull
 from scipy.spatial import cKDTree as KDTree # pyright: ignore[reportAttributeAccessIssue] (alternatively use KDTree from sklearn.neighbors, not C optimized)
 
 from multiprocessing import Pool
 from Visualizer import Visualizer
 from Distance_Measures import chamfer
+
+
+def sample(l: list, n: Optional[int]):
+    n = len(l) if n == None else min(n, len(l))
+    return random.sample(l, n)
+
+
+def index(lst: list, idx: list):
+    ret = []
+    for i in idx:
+        if i < len(lst):
+            ret.append(lst[i])
+        else:
+            ret.append(lst[0])
+    return ret
 
 
 def euk_dist_sq(p1 : Point, p2 : Point) -> float:
@@ -86,8 +102,8 @@ def align_to_point(vias : list[Point], point : Point) -> list[Point]:
     return [diff_pts(point, v) for v in vias]
 
 
-def align_vias(cell1_vias : list[Point], cell2_vias : list[Point], itr_count: Optional[int] = 5) -> tuple[list[Point], list[Point]]:
-    """ Given to sets of vias (points) try to align them as well as possible. For the optimal results all points
+def align_vias_brute_force(cell1_vias : list[Point], cell2_vias : list[Point], itr_count: Optional[int] = 5) -> tuple[list[Point], list[Point]]:
+    """ Given two sets of vias (points) try to align them as well as possible. For the optimal results all points
     would have to be tested but in all cases 5 works well enough. To use all points set itr_count to `None`."""
     if not (cell1_vias and cell2_vias): return cell1_vias, cell2_vias
     cell1, cell2 = deepcopy(cell1_vias), deepcopy(cell2_vias)
@@ -111,46 +127,53 @@ def align_vias(cell1_vias : list[Point], cell2_vias : list[Point], itr_count: Op
     return aligned_cell1, aligned_cell2
 
 
-def align_vias_efficient(cell1_vias : list[Point], cell2_vias : list[Point], itr_count: Optional[int] = 5) -> tuple[list[Point], list[Point]]:
-    """ Given to sets of vias (points) try to align them as well as possible. For the optimal results all points
-    would have to be tested but in all cases 5 works well enough. To use all points set itr_count to `None`."""
+def align_vias(cell1_vias : list[Point], cell2_vias : list[Point], itr_count: Optional[int] = None, k: int = 3) -> tuple[list[Point], list[Point]]:
+    """ Given two sets of vias (points) try to align them as well as possible. For the optimal results k schould be 
+    len(cell2_vias) which kills the efficiency. k=3 approximates well enough. To use all points set itr_count to `None`."""
     if not (cell1_vias and cell2_vias): return cell1_vias, cell2_vias
-    cell1_vias, cell2_vias = np.array(deepcopy(cell1_vias)), np.array(deepcopy(cell2_vias)) #type: ignore
+    cell1_vias, cell2_vias = deepcopy(cell1_vias), deepcopy(cell2_vias) # type: ignore
     
     # Align each point to (0,0) once
-    itr_count = len(cell1_vias) if itr_count == None else min(itr_count, len(cell1_vias))
-    alignments_p1 = np.array([(p1, align_to_point(cell1_vias, p1)) for p1 in random.sample(list(cell1_vias), itr_count)], dtype=object)
-    alignments_p2 = np.array([align_to_point(cell2_vias, p2) for p2 in cell2_vias], dtype=object)
+    alignments_p1 = [(p1, align_to_point(cell1_vias, p1)) for p1 in sample(cell1_vias, itr_count)]
+    alignments_p2 = [align_to_point(cell2_vias, p2) for p2 in cell2_vias]
     cell2_vias_KD = KDTree(cell2_vias)
     min_scores = []
 
     for p1, p1_aligned in alignments_p1:
         # Score all the alignments bettween cell1 and cell2
         p1_points = KDTree(p1_aligned)
-        TwoNN_p1 = cell2_vias_KD.query(p1, k=2)[1]
-        aligned_p2 = zip(cell2_vias[TwoNN_p1], alignments_p2[TwoNN_p1])
+        p1_NN = cell2_vias_KD.query(p1, k=k)[1]
+        # If k is too large, query will return out of bound values, we map them to p1_NN[0]
+        p2_aligned = zip(index(cell2_vias, p1_NN), index(alignments_p2, p1_NN))
 
-        fitting_scores = [(p1, p2, sum(p1_points.query(p2_points)[0])) for p2, p2_points in aligned_p2]
+        fitting_scores = [(p1, p2, sum(p1_points.query(p2_points)[0])) for p2, p2_points in p2_aligned]
         min_scores.append(min(fitting_scores, key = lambda x : x[2]))
 
     p1_alignment, p2_alignment, _ = min(min_scores, key = lambda x : x[2])
-    aligned_cell1, aligned_cell2 = [diff_pts(p1, p1_alignment) for p1 in cell1_vias], [diff_pts(p2, p2_alignment) for p2 in cell2_vias]
-    aligned_cell1, aligned_cell2 = [add_pts(p1, p2_alignment) for p1 in aligned_cell1], [add_pts(p2, p1_alignment) for p2 in aligned_cell2]
+    aligned_cell1, aligned_cell2 = [diff_pts(p1, p1_alignment) for p1 in cell1_vias], [diff_pts(p2, p2_alignment) for p2 in cell2_vias] # type: ignore
+    aligned_cell1, aligned_cell2 = [add_pts(p1, p2_alignment) for p1 in aligned_cell1], [add_pts(p2, p1_alignment) for p2 in aligned_cell2] # type: ignore
     return aligned_cell1, aligned_cell2
 
 
-def align_all_cells(cells: list[Cell],
+def align_cells(cells: list[Cell],
                     vias: list[Point] | None,
-                    itr_count: int = 50,
-                    distance_measure: Callable[[list[Point], list[Point]], float] = chamfer) -> tuple[list[Cell], list[float]]:
+                    box: Optional[tuple[int | float, int | float]] = None,
+                    itr_count: Optional[int] = None,
+                    distance_measure: Callable[[list[Point], list[Point]], float] = chamfer) -> tuple[list[Cell], list[Optional[float]]]:
     cells = deepcopy(cells)
     # Set vias to a draft representative
     vias = vias if vias else find_representative_vias(cells, num_cells=100, alignment_itr=10, filter_itr=1)
     aligned_cells = []
     for cell in tqdm(cells):
-        cell["vias"] = align_vias_efficient(cell["vias"], vias, itr_count=itr_count)[0]
-        if cell["vias"]: aligned_cells.append((cell, distance_measure(cell["vias"], vias)))
-        else: warnings.warn("Cannot compute distance of cells with no vias, ignoring cell...")
+        new_vias = align_vias(cell["vias"], vias, itr_count=itr_count)[0]
+        if box:
+            new_vias = [point for point in new_vias if 0 <= point[0] <= box[0] and 0 <= point[1] <= box[1]]
+        cell["vias"] = new_vias
+        if cell["vias"]:
+            aligned_cells.append((cell, distance_measure(cell["vias"], vias)))
+        else:
+            warnings.warn("Cannot compute distance of cells with no vias, setting distance to None...")
+            aligned_cells.append((cell, None)) # type: ignore
 
     cells_aligned, distances = zip(*aligned_cells) if aligned_cells else ([], [])
     return list(cells_aligned), list(distances)
@@ -200,7 +223,6 @@ def find_representative_vias(cells: Iterable[Cell],
                              alignment_itr : int = 50,
                              filter_itr: int = 2,
                              filter_threshold = 0.995,
-                             plot: bool = False,
                              multiprocess: bool = False) -> list[Point]:
     via_count, cell_vias = get_aligned_vias(cells, num_cells=num_cells, alignment_itr=alignment_itr, multiprocess=multiprocess)
 
@@ -226,12 +248,7 @@ def find_representative_vias(cells: Iterable[Cell],
             # Filter points outside of threshold. Filter option can be adapted
             filtered_vias = filtered_vias[distances < rayleigh.ppf(filter_threshold, loc=loc, scale=scale)] 
             kmeans.fit(filtered_vias)
-        representative = [tuple(pt) for pt in kmeans.cluster_centers_]
-    
-    if plot:
-        print("Plotting...")
-        visualizer = Visualizer(cells[0]["box"], cells, representative, list(filtered_vias))
-        visualizer.display_all()
+        representative = [tuple(point) for point in kmeans.cluster_centers_]
     return representative
 
 

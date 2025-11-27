@@ -104,12 +104,12 @@ class DataCache:
         aligned_cells = {} if reset else self.get_aligned_cells()
         cell_types = cell_types if replace else [cell_type for cell_type in cell_types if cell_type not in aligned_cells]
 
-        new_cells = {cell_type : 
-                         align_all_cells(
-                             self.get_sorted_cells().get(cell_type, [])[:cell_num],
-                             self.get_representatives().get(cell_type, None)
-                            )
-                        for cell_type in cell_types}
+        if cell_types:
+            with Pool() as pool:
+                aligned = pool.starmap(align_cells,[(self.get_sorted_cells().get(cell_type, [])[:cell_num],
+                             self.get_representatives().get(cell_type, None), self.get_boxes().get(cell_type, None)) for cell_type in cell_types])
+                new_cells = dict(zip(cell_types, aligned))
+        else: new_cells = {}
         
         aligned_cells.update(new_cells)
         self._cache_aligned_cells(aligned_cells)
@@ -130,7 +130,7 @@ class DataCache:
     def get_sorted_cells(self) -> dict[str, list[Cell]]: return self.sorted_cells
     def get_representatives(self) -> dict[str, list[tuple[float, float]]]: return self.representatives
     def get_boxes(self) -> dict[str, tuple[float, float]]: return self.boxes
-    def get_aligned_cells(self) -> dict[str, tuple[list[Cell], list[float]]]: return self.aligned_cells
+    def get_aligned_cells(self) -> dict[str, tuple[list[Cell], list[Optional[float]]]]: return self.aligned_cells
 
 
     # -------- Private functions --------

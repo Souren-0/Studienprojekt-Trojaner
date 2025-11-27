@@ -8,9 +8,9 @@ import statistics
 from Data_Manager import *
 from Cell_Via_Utilities import *
 from collections import Counter
+from scipy.stats import rayleigh
 
 # Benutze Sphinx für Dokumentation
-# Rigit registration für alignment
 
 DATASETS = {
 "28nm_chip" : {"path" : Path("./Data/Chip_Data_28nm.pickle")}
@@ -24,6 +24,23 @@ def check_efficiency(function, args):
     return ret
 
 
+def alignment_test(cell_type="BLS"):
+    aligned, dists = check_efficiency(align_cells, (sorted_cells[cell_type], representatives[cell_type]))
+    dists = np.array(dists)
+    print("min:", dists.min())
+    print("max:", dists.max())
+    print("mean:", dists.mean())
+    print("median:", np.median(dists))
+    print(f"Top 10: {np.sort(dists)[-10:]}")
+    v = Visualizer(boxes[cell_type], aligned[:1000], representatives[cell_type])
+    v.display_all()
+    plt.plot(dists)
+    plt.xlabel("Distance")
+    plt.ylabel("Count")
+    plt.title("Distribution of distances")
+    plt.show()
+
+
 def data_overview(sorted_cells):
     rows = []
     for cell_type, cells in sorted_cells.items():
@@ -35,13 +52,64 @@ def data_overview(sorted_cells):
             "vias": majority_vias,
             "total_vias" : len(cells) * majority_vias
         })
-    return pd.DataFrame(rows)
+    df = pd.DataFrame(rows)
+    df = df.sort_values("total_vias", ascending=False)
+    return df
+
+
+def group_by_width():
+    grouped = defaultdict(list)
+
+    for cell_type, (width, _) in boxes.items():
+        key = width
+        for w in grouped:
+            if abs(w - width) <= 3:
+                key = w
+                break
+        grouped[key].append(cell_type)
+
+    rows = []
+    for w, types in grouped.items():
+        total_vias = 0
+        for t in types:
+            cells = sorted_cells[t]
+            majority = Counter(len(c["vias"]) for c in cells).most_common(1)[0][0]
+            total_vias += len(cells) * majority
+
+        rows.append({
+            "Width": w,
+            "Types_amount": len(types),
+            "Types": types,
+            "Total_vias": total_vias
+        })
+
+    df = pd.DataFrame(rows).sort_values("Total_vias", ascending=False)
+    return df
+
+
+def get_cell_type_info(df, cells):
+    return df[df['type'].isin(cells)]
 
 
 def get_mapping(dataset="28nm"):
     with open("./Data/Cell_Mapping.pickle", "rb") as f:
         data = pickle.load(f)
     return data[dataset]
+
+
+def distance_distribution_own_label(aligned_cells, cell_types, threshold):
+    for cell_type in cell_types:
+        _, dists = aligned_cells[cell_type]
+        dists = [dist for dist in dists if dist is not None]
+        if len(dists) > threshold:
+            x = np.linspace(0, max(dists), 100)
+            params = rayleigh.fit(dists)
+            pdf = rayleigh.pdf(x, *params)
+            plt.plot(x, pdf, label=cell_type)
+    plt.xlabel("Distance")
+    plt.ylabel("Density")
+    plt.legend()
+    plt.show()
 
 
 if __name__ == "__main__":
@@ -61,38 +129,88 @@ Total Boxes: {len(boxes)}
 Total Representatives: {len(representatives)}
 Total aligned cells: {len(aligned_cells)}""")
 
-    # df = data_overview(sorted_cells)
-    # df = df.sort_values("total_vias", ascending=False)
-    # print(df[:10])
 
-    cell_type = "BLS"
-    aligned, dists = check_efficiency(align_all_cells, (sorted_cells[cell_type], representatives[cell_type]))
+    overview_df = data_overview(sorted_cells)
+    width_df = group_by_width()
+    cell_type_group = width_df.iloc[2]["Types"][1:]
+    
+    # print(width_df[:10])
+    # print(get_cell_type_info(overview_df, cell_type_group))
+    # cache.update_aligned_cells(cell_type_group, replace=True)
+
+    dist_matrix = {}
+    for rep1 in cell_type_group:
+        rep_vias = representatives[rep1]
+        other_reps = [{"vias": representatives[rep2]} for rep2 in cell_type_group]
+        _, dists = align_cells(other_reps, representatives[rep1], boxes[rep1]) # type: ignore
+        dist_matrix[rep1] = dists
+    # pprint(dist_matrix)
+
+    # reps = list(cell_type_group)
+    # # convert dict of lists into a square matrix
+    # M = np.array([dist_matrix[r] for r in reps], dtype=float)
+    # plt.imshow(M, cmap="viridis", interpolation="nearest")
+    # plt.colorbar(label="Distance")
+    # plt.xticks(range(len(reps)), reps, rotation=90)
+    # plt.yticks(range(len(reps)), reps)
+    # plt.title("Representative Distance Matrix")
+    # plt.tight_layout()
+    # plt.show()
+
+    # flatten
+    # all_dists = []
+    # for d in dist_matrix.values():
+    #     all_dists.extend([x for x in d if x is not None and x >= 0])
+
+    # all_dists = np.array(all_dists)
+    # if len(all_dists) == 0:
+    #     print("No valid distances")
+    # else:
+    #     params = rayleigh.fit(all_dists)
+    #     x = np.linspace(0, all_dists.max(), 300)
+    #     pdf = rayleigh.pdf(x, *params)
+
+    #     plt.plot(x, pdf)
+    #     plt.show()
+
+    # for cell_type in cell_type_group[3:5]:
+    #     print(cell_type)
+    #     v = Visualizer(boxes[cell_type], cache.get_sorted_cells()[cell_type][:1000], representatives[cell_type])
+    #     v.display_all()
+    #     v = Visualizer(boxes[cell_type], cache.get_aligned_cells()[cell_type][0][:1000], representatives[cell_type])
+    #     v.display_all()
+
+    # distance_distribution_own_label(aligned_cells, cell_type_group, 2)
+
+    # cell_type = "BKE"
+    # temp_BKI = ["BKI", "BKK", "BJI", "AMK", "BJS", "BAS", "ALE"]
+    # temp_BKE = ["BKE", "BKI", "BKK", "BHE", "BJS", "BAS", "ALE"]
+    # dist_dict = {rep: align_cells(sorted_cells[cell_type], representatives[rep], boxes[rep])[1] for rep in temp_BKE}
+
+    # for rep, dists in dist_dict.items():
+    #     d = [x for x in dists if x is not None and x >= 0]
+    #     if len(d) < 2: 
+    #         continue
+
+    #     params = rayleigh.fit(d)
+    #     x = np.linspace(0, max(d), 200)
+    #     pdf = rayleigh.pdf(x, *params)
+
+    #     plt.plot(x, pdf, label=rep)
+
+    # plt.legend()
+    # plt.xlabel("Distance")
+    # plt.ylabel("Density")
+    # plt.show()
+
+    # cell_type = cell_type_group[1]
+    # print(cell_type)
+    # aligned, _ = aligned_cells[cell_type]
+    # aligned = sorted_cells[cell_type]
+    # aligned = aligned[:1000]
     # v = Visualizer(boxes[cell_type], aligned, representatives[cell_type])
     # v.display_all()
-    dists = np.array(dists)
-    print("min:", dists.min())
-    print("max:", dists.max())
-    print("mean:", dists.mean())
-    print("median:", np.median(dists))
-    # cache.update_representatives(cell_types, replace=True, reset=True)
-    # print("BIW:", len(sorted_cells["BIW"]))
-    # print("BDA:", len(sorted_cells["BDA"]))
-    # print("GU:", len(sorted_cells["GU"]))
 
-    # v = Visualizer(boxes["BIW"], sorted_cells["BDA"])
-    # v.display_all()
-
-    # !!! Important for next step (hopefully tomorrow) !!!
-    # Grouping types by their widths +/- 3 margin
-    # grouped_width_celltypes: dict[int | float, list[str]] = defaultdict(list)
-    # for cell_type, (width, height) in boxes.items():
-    #     key = width
-    #     for w in grouped_width_celltypes.keys():
-    #         if abs(w - width) <= 3:
-    #             key = w
-    #             break
-    #     grouped_width_celltypes[key].append(cell_type)
-    
     # grouped_representatives: list[dict[str, list[Point]]] = []
     # for rep_group in grouped_width_celltypes.values():
     #     grouped_representatives.append({rep : representatives[rep] for rep in rep_group})
@@ -212,5 +330,3 @@ Total aligned cells: {len(aligned_cells)}""")
     # v = Visualizer(boxes[cell_type], trojans, representatives[cell_type])
     # v.display_all()
     # print(len(sorted_cells[cell_type]))
-
-# BLS
