@@ -106,8 +106,11 @@ class DataCache:
 
         if cell_types:
             with Pool() as pool:
-                aligned = pool.starmap(align_cells,[(self.get_sorted_cells().get(cell_type, [])[:cell_num],
-                             self.get_representatives().get(cell_type, None), self.get_boxes().get(cell_type, None)) for cell_type in cell_types])
+                aligned = pool.starmap(align_cells,
+                                       [(self.get_sorted_cells().get(cell_type, [])[:cell_num],
+                                         self.get_representatives().get(cell_type, None),
+                                         self.get_boxes().get(cell_type, None))
+                                         for cell_type in cell_types])
                 new_cells = dict(zip(cell_types, aligned))
         else: new_cells = {}
         

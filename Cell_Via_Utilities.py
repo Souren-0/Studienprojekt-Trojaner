@@ -252,23 +252,50 @@ def find_representative_vias(cells: Iterable[Cell],
     return representative
 
 
-def assign_cell_type(cell: Cell, representatives: dict[str, list[Point]]) -> str:
+def cell_to_label_dists(cell: Cell, representatives: dict[str, list[Point]]) -> dict[str, float]:
     cell_vias = cell["vias"]
-    dists = []
+    dists = {}
     for representative, vias in representatives.items():
         aligned_cell = align_vias(cell_vias, vias, itr_count=None)[0]
-        dists.append((representative, chamfer(aligned_cell, vias)))
-    return min(dists, key=lambda x: x[1])[0]
+        dists[representative] = chamfer(aligned_cell, vias)
+    return dists
+
+
+def assign_cell_type(cell: Cell, representatives: dict[str, list[Point]]) -> str:
+    dists = cell_to_label_dists(cell, representatives)
+    current_label = ("No label", float('inf'))
+    for representative, dist in dists.items():
+        if dist < current_label[1]:
+            current_label = (representative, dist)
+    return current_label[0]
+
+
+def assign_cell_type_biased(cell: Cell, representatives: dict[str, list[Point]], performance_improvement: float = 0) -> str:
+    dists = cell_to_label_dists(cell, representatives)
+    favored_label = cell["data"]["name"]
+    if favored_label not in dists:
+        warnings.warn("Cannot label biased. Cell type not in representatives")
+    thr = dists[favored_label] if favored_label in dists else float('inf')
+
+    current_label = (favored_label, thr)
+    for representative, dist in dists.items():
+        if dist < thr * (1 - performance_improvement) and dist < current_label[1]:
+            current_label = (representative, dist)
+    return current_label[0]
 
 
 def check_cells_for_trojan(cells, dists, confidence_threshold=0.9999):
-    if cells and dists:
-        cells, dists = np.array(cells), np.array(dists)
-        loc, scale = rayleigh.fit(dists)
-        cells = cells[dists > rayleigh.ppf(confidence_threshold, loc=loc, scale=scale)]
-    else:
-        cells = []
-    return list(cells)
+    if not cells or not dists:
+        return []
+
+    cell_dists = [(c, d) for c, d in zip(cells, dists) if d is not None]
+    cells, dists = zip(*cell_dists)  # unzip
+    cells, dists = np.array(cells), np.array(dists)
+
+    loc, scale = rayleigh.fit(dists)
+
+    mask = dists > rayleigh.ppf(confidence_threshold, loc=loc, scale=scale)
+    return list(cells[mask])
 
 
 # def sort_cells(cells, dists, top_x: int = 3):

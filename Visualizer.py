@@ -24,18 +24,19 @@ colors = {
 
 class Visualizer:
     def __init__(self,
-                 box: tuple[float, float] | tuple[Point, Point],
                  cells: list[Cell] = [],
                  representative: Optional[list[Point]] = None,
-                 vias: Optional[list[Point]] = None) -> None:
+                 vias: Optional[list[Point]] = None,
+                 box: Optional[tuple[float, float] | tuple[Point, Point]] = None) -> None:
         self.cells: list[Cell] = cells
         self.representative = representative
         self.vias = vias
 
-        if isinstance(box[0], (int, float)):
+        if box and isinstance(box[0], (int, float)):
             width, height = cast(tuple[float, float], box)
         else:
-            box = cast(tuple[Point, Point], box)
+            box = cast(tuple[Point, Point], box) if box \
+                else (cells[0]['box'] if cells else ((0,0), (0,0)))
             top_left, bottom_right = box
             width = bottom_right[0] - top_left[0]
             height = bottom_right[1] - top_left[1]

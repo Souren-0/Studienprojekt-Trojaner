@@ -97,6 +97,22 @@ def get_mapping(dataset="28nm"):
     return data[dataset]
 
 
+def plot_distance_distributions(dists_list, threshold=2):
+    for dists in dists_list:
+        d = np.array([x for x in dists if x is not None])
+        if len(d) < threshold:
+            continue
+        params = rayleigh.fit(d)
+        x = np.linspace(0, d.max(), 200)
+        y = rayleigh.pdf(x, *params)
+        plt.plot(x, y)
+
+    plt.xlabel("Distance")
+    plt.ylabel("Density")
+    plt.title("Rayleigh Distributions")
+    plt.show()
+
+
 def distance_distribution_own_label(aligned_cells, cell_types, threshold):
     for cell_type in cell_types:
         _, dists = aligned_cells[cell_type]
@@ -134,16 +150,43 @@ Total aligned cells: {len(aligned_cells)}""")
     width_df = group_by_width()
     cell_type_group = width_df.iloc[2]["Types"][1:]
     
+    cell_type = "BKI"
+    cells_dists = aligned_cells[cell_type]
+    # trojans = check_cells_for_trojan(*aligned_cells[cell_type])
+    # print(len(trojans))
+    reps = {rep : representatives[rep] for rep in cell_type_group}
+    cells_to_check = check_cells_for_trojan(*cells_dists, 0.8)[:10]
+    assigned = defaultdict(list)
+    for cell in tqdm(cells_to_check):
+        label = assign_cell_type_biased(cell, reps, 0.5)
+        assigned[label].append(cell)
+    
+    # pprint(assigned[list(assigned.keys())[0]])
+    counts = {rep: len(cells) for rep, cells in assigned.items()}
+    plt.bar(counts.keys(), counts.values())
+    plt.xticks(rotation=45)
+    plt.ylabel("Count")
+    plt.show()
+
+    v = Visualizer(assigned['BJI'], representatives['BJI'], representatives[cell_type])
+    v.display_all()
+
+    # cell_type = "BKK"
+    # trojans = check_cells_for_trojan(*aligned_cells[cell_type])
+    # print(len(trojans))
+    # v = Visualizer(boxes[cell_type], trojans, representatives[cell_type])
+    # v.display_all()
+
     # print(width_df[:10])
     # print(get_cell_type_info(overview_df, cell_type_group))
     # cache.update_aligned_cells(cell_type_group, replace=True)
 
-    dist_matrix = {}
-    for rep1 in cell_type_group:
-        rep_vias = representatives[rep1]
-        other_reps = [{"vias": representatives[rep2]} for rep2 in cell_type_group]
-        _, dists = align_cells(other_reps, representatives[rep1], boxes[rep1]) # type: ignore
-        dist_matrix[rep1] = dists
+    # dist_matrix = {}
+    # for rep1 in cell_type_group:
+    #     rep_vias = representatives[rep1]
+    #     other_reps = [{"vias": representatives[rep2]} for rep2 in cell_type_group]
+    #     _, dists = align_cells(other_reps, representatives[rep1], boxes[rep1]) # type: ignore
+    #     dist_matrix[rep1] = dists
     # pprint(dist_matrix)
 
     # reps = list(cell_type_group)
