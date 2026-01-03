@@ -17,3 +17,9 @@ class Cell(TypedDict):
     box: tuple[Point, Point]
     image: str | Path
     vias: list[Point]
+
+
+class Predicted_Cell(TypedDict):
+    cell: Cell
+    actual: str
+    predicted: str

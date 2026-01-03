@@ -26,9 +26,11 @@ from Visualizer import Visualizer
 from Distance_Measures import chamfer
 
 
-def sample(l: list, n: Optional[int]):
-    n = len(l) if n == None else min(n, len(l))
-    return random.sample(l, n)
+def sample(lst, k):
+    if k is None or k >= len(lst):
+        return lst[:]
+    indices = sorted(random.sample(range(len(lst)), k))
+    return [lst[i] for i in indices]
 
 
 def index(lst: list, idx: list):
@@ -206,7 +208,7 @@ def get_aligned_vias(cells: Iterable[Cell],
     all_vias = deepcopy(start_cell["vias"])
     
     num_cells = len(cells) if num_cells == None else min(num_cells, len(cells))
-    args = [(start_cell["vias"], cell["vias"], alignment_itr) for cell in random.sample(cells, num_cells)]
+    args = [(start_cell["vias"], cell["vias"], alignment_itr) for cell in sample(cells, num_cells)]
     if multiprocess:
         with Pool() as pool:
             results = pool.starmap(align_vias, args)
@@ -261,16 +263,7 @@ def cell_to_label_dists(cell: Cell, representatives: dict[str, list[Point]]) -> 
     return dists
 
 
-def assign_cell_type(cell: Cell, representatives: dict[str, list[Point]]) -> str:
-    dists = cell_to_label_dists(cell, representatives)
-    current_label = ("No label", float('inf'))
-    for representative, dist in dists.items():
-        if dist < current_label[1]:
-            current_label = (representative, dist)
-    return current_label[0]
-
-
-def assign_cell_type_biased(cell: Cell, representatives: dict[str, list[Point]], performance_improvement: float = 0) -> str:
+def assign_cell_type(cell: Cell, representatives: dict[str, list[Point]], bias_strength: float = 0.5) -> str:
     dists = cell_to_label_dists(cell, representatives)
     favored_label = cell["data"]["name"]
     if favored_label not in dists:
@@ -279,7 +272,7 @@ def assign_cell_type_biased(cell: Cell, representatives: dict[str, list[Point]],
 
     current_label = (favored_label, thr)
     for representative, dist in dists.items():
-        if dist < thr * (1 - performance_improvement) and dist < current_label[1]:
+        if dist < thr * (1 - bias_strength) and dist < current_label[1]:
             current_label = (representative, dist)
     return current_label[0]
 
@@ -290,12 +283,23 @@ def check_cells_for_trojan(cells, dists, confidence_threshold=0.9999):
 
     cell_dists = [(c, d) for c, d in zip(cells, dists) if d is not None]
     cells, dists = zip(*cell_dists)  # unzip
-    cells, dists = np.array(cells), np.array(dists)
+    cells, dists = np.array(cells), (np.array(dists) + np.finfo(float).eps)
 
     loc, scale = rayleigh.fit(dists)
 
     mask = dists > rayleigh.ppf(confidence_threshold, loc=loc, scale=scale)
     return list(cells[mask])
+
+
+def predict_trojans(cells: list[Cell], dists: list[Optional[float]], representatives: dict[str, list[Point]]) -> list[Predicted_Cell]:
+    ret = []
+    possible_trojans = check_cells_for_trojan(cells, dists, 0.9)
+    for trojan in tqdm(possible_trojans):
+        predicted = assign_cell_type(trojan, representatives)
+        actual = trojan["data"]["name"]
+        if predicted != actual:
+            ret.append(Predicted_Cell(cell=trojan, actual=actual, predicted=predicted))
+    return ret
 
 
 # def sort_cells(cells, dists, top_x: int = 3):
