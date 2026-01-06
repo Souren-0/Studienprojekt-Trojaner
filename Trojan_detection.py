@@ -1,17 +1,16 @@
 # from collections import defaultdict, Counter
+import numpy as np
 import pandas as pd
-from matplotlib import pyplot as plt
-# from Visualizer import Visualizer
 from pprint import pprint
-# import Distance_Measures
-import statistics
-from Cell_Inspector import Cell_Inspector
 from Data_Manager import *
-from Cell_Via_Utilities import *
 from collections import Counter
 from scipy.stats import rayleigh
-
-# Benutze Sphinx für Dokumentation
+from matplotlib import pyplot as plt
+from Visualizer import Visualizer
+from Cell_Inspector import Cell_Inspector
+from Labeling_Utilities import predict_trojans
+from Alignment_Utilities import align_cells
+from Distance_Measures import *
 
 DATASETS = {
 "28nm_chip" : {"path" : Path("./Data/Chip_Data_28nm.pickle")}
@@ -59,15 +58,20 @@ def data_overview(sorted_cells):
 
 
 def group_by_width(sorted_cells=[], boxes=[]):
-    grouped = defaultdict(list)
+    groups = defaultdict(list)
 
     for cell_type, (width, _) in boxes.items():
         key = width
-        for w in grouped:
-            if abs(w - width) <= 3:
+        for w in groups:
+            if abs(w - width) <= 10:
                 key = w
                 break
-        grouped[key].append(cell_type)
+        groups[key].append(cell_type)
+    
+    grouped = {}
+    for group in groups.values():
+        widths = [boxes[cell_type][0] for cell_type in group]
+        grouped[(min(widths), max(widths))] = group
 
     rows = []
     for w, types in grouped.items():
@@ -88,8 +92,8 @@ def group_by_width(sorted_cells=[], boxes=[]):
     return df
 
 
-def get_cell_type_info(df, cells):
-    return df[df['type'].isin(cells)]
+def get_cell_type_info(df, cell_types):
+    return df[df['type'].isin(cell_types)]
 
 
 def get_mapping(dataset="28nm"):
@@ -129,6 +133,23 @@ def distance_distribution_own_label(aligned_cells, cell_types, threshold):
     plt.show()
 
 
+def start_trojan_scan(sorted_cells, aligned_cells, representatives, boxes, cache: DataCache):
+    width_df = group_by_width(sorted_cells, boxes)
+    width_groups = {row['Width']: row['Types'] for _, row in width_df.iterrows()}
+
+    trojans = cache.get_confirmed_trojans()
+    for width, group in width_groups.items():
+        group_representatives = {k : v for (k, v) in representatives.items() if k in group}
+        cells = []
+        dists = []
+        for cell_type in group:
+            c, d = aligned_cells[cell_type]
+            cells.extend(c)
+            dists.extend(d)
+        trojans[width] = predict_trojans(cells, dists, group_representatives)
+    cache.save_confirmed_trojans(trojans)
+
+
 if __name__ == "__main__":
     dataset = "28nm_chip"
     chip_data_file = DATASETS[dataset]["path"]
@@ -145,25 +166,24 @@ f"""Cell types: {len(sorted_cells)}
 Total Boxes: {len(boxes)}
 Total Representatives: {len(representatives)}
 Total aligned cells: {len(aligned_cells)}""")
-
-    overview_df = data_overview(sorted_cells)
-    # print(overview_df[:20])
-
-    width_df = group_by_width(sorted_cells, boxes)
-    cell_type_group = width_df.iloc[2]["Types"][1:]
-    cell_type_group_representatives = {k : v for (k, v) in representatives.items() if k in cell_type_group}
-    cell_type_group_overview = overview_df[overview_df["type"].isin(cell_type_group)]
-    # cell_type_group_overview["aligned"] = (cell_type_group_overview["type"].isin(aligned_cells))
-    # print(cell_type_group_overview)
-
-    predicted_trojans = []
-
-    for cell_type in cell_type_group:
-        cells, dists = aligned_cells[cell_type]
-        predicted_trojans.extend(predict_trojans(cells, dists, cell_type_group_representatives))
-    approved_trojans = []
-    inspector = Cell_Inspector(predicted_trojans, approved_trojans, representatives, chamfer)
-    inspector.start_interactive()
     
-    print(len(approved_trojans))
-    print(approved_trojans[0]["cell"])
+    width_df = group_by_width(sorted_cells, boxes)
+    width_df = width_df[width_df["Width"] == (268, 268)]
+    print(width_df["Types"].tolist()[0])
+    print(get_cell_type_info(data_overview(sorted_cells), width_df["Types"].tolist()[0]))
+
+    all_trojans = cache.get_confirmed_trojans()
+
+    # For each width range show how many cells were predicted as trojans
+    for w, trojans in all_trojans.items():
+        print(f"{str(w):<15}: {len(trojans)}")
+
+    # For each width range start inspecting trojans if there are any
+    # After inspection confirmed trojans are updated in the cache
+    for w, trojans in all_trojans.items():
+        if not trojans: continue
+        confirmed: list[Predicted_Cell] = []
+        inspector = Cell_Inspector(trojans, confirmed, representatives, chamfer)
+        inspector.start_interactive()
+        all_trojans[w] = confirmed
+    # cache.save_confirmed_trojans(all_trojans)

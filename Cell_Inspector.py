@@ -1,16 +1,17 @@
 """
-Module: Cell_Inspector
+Module: Cell_Inspector <br>
 Author: Souren Ishkhanian
 
 This module helps manually checking for trojans.
 """
 
-from typing import Any, Callable
-from matplotlib.patches import Rectangle
-from Annotation_Helpers import *
-import matplotlib.pyplot as plt
 import seaborn as sns
-from Cell_Via_Utilities import align_vias
+import matplotlib.pyplot as plt
+from matplotlib.patches import Rectangle
+from matplotlib.backend_bases import Event, KeyEvent
+from Alignment_Utilities import align_vias
+from Annotation_Helpers import *
+from typing import cast
 
 plt.style.use('dark_background')
 
@@ -23,16 +24,40 @@ colors = {
 }
 
 class Cell_Inspector:
+    """
+    A class for interactively inspecting predicted cells and identifying trojans.
+
+    Attributes:
+        predicted_cells (list[Predicted_Cell]): Cells to be manually inspected.
+        trojans (list[Predicted_Cell]): Cells confirmed as trojans.
+        representatives (dict[str, list[Point]]): Representative "perfect cell" templates keyed by label.
+        distance (Callable[[list[Point], list[Point]], float]): Function to compute distance between vias.
+        rep_mode (bool): Whether to use actual or predicted label for distance comparison.
+        i (int): Index of the current cell being inspected.
+        fig (Figure): Matplotlib figure.
+        ax (Axes): Matplotlib axes.
+    """
+
     def __init__(self,
                  predicted_cells: list[Predicted_Cell],
                  trojans: list[Predicted_Cell],
                  representatives: dict[str, list[Point]],
                  distance_measure: Callable[[list[Point], list[Point]], float]) -> None:
+        """
+        Initialize the Cell_Inspector with predicted cells, mutable list to save trojans, representatives, and a distance function.
+
+        Args:
+            predicted_cells (list[Predicted_Cell]): Cells to inspect.
+            trojans (list[Predicted_Cell]): List to store confirmed trojans.
+            representatives (dict[str, list[Point]]): Representative via positions for each label.
+            distance_measure (Callable[[list[Point], list[Point]], float]): Function to compute distance between two sets of vias.
+        """
         
         self.predicted_cells = predicted_cells
         self.representatives = representatives
         self.rep_mode = True
         self.i = 0
+        self.zoom = 0.2
 
         self.distance = distance_measure
         self.trojans = trojans
@@ -41,20 +66,35 @@ class Cell_Inspector:
         self._show_current()
 
 
-    def _get_current(self):
+    def _get_current(self) -> Optional[Predicted_Cell]:
+        """
+        Get the current cell being inspected.
+
+        Returns:
+            Optional[Predicted_Cell]: The current predicted cell, or None if no cells remain.
+        """
         n = len(self.predicted_cells)
         self.i = (self.i % n) if n > 0 else 0
         return self.predicted_cells[self.i] if self.predicted_cells else None
 
     
-    def _confirm_trojan(self, confirmed: bool):
+    def _confirm_trojan(self, confirmed: bool) -> None:
+        """
+        Confirm or discard the current cell as a trojan.
+
+        Args:
+            confirmed (bool): If True, mark the current cell as a trojan.
+        """
         current = self._get_current()
         if confirmed and current:
             self.trojans.append(current)
         del self.predicted_cells[self.i]
 
 
-    def _show_current(self):
+    def _show_current(self) -> None:
+        """
+        Display the current cell, its vias, representative alignments, and distance metrics on the plot.
+        """
         self.ax.cla()
         current = self._get_current()
         if current:
@@ -86,36 +126,73 @@ class Cell_Inspector:
         plt.draw()
 
 
-    def _make_box(self, current):
+    def _make_box(self, current: Predicted_Cell) -> None:
+        """
+        Draw a rectangle representing the cell's bounding box.
+
+        Args:
+            current (Predicted_Cell): The cell whose box will be drawn.
+        """
         top_left, bottom_right = current["cell"]["box"]
         width = bottom_right[0] - top_left[0]
         height = bottom_right[1] - top_left[1]
         box = Rectangle((0, 0), width, height, facecolor='none', edgecolor=colors['line_color'])
         self.ax.add_patch(box)
-        self.ax.set_xlim(-0.25*width, 1.25*width)
-        self.ax.set_ylim(-0.25*height, 1.25*height)
+        self.ax.set_xlim(-self.zoom*width, (1+self.zoom)*width)
+        self.ax.set_ylim(-self.zoom*height, (1+self.zoom)*height)
 
 
-    def _scatter_vias(self, vias: list[Point], description: str, color: str, size: int = 10, zorder: int = 2):
-        x_val, y_val = zip(*vias) if vias else (None, None)
+    def _scatter_vias(self, vias: list[Point], description: str, color: str, size: int = 10, zorder: int = 2) -> None:
+        """
+        Plot vias as a scatter plot.
+
+        Args:
+            vias (list[Point]): List of points to plot.
+            description (str): Label for the scatter points.
+            color (str): Color for the points.
+            size (int): Marker size.
+            zorder (int): Layer order for plotting.
+        """
+        x_val, y_val = zip(*vias) if vias else ([], [])
         sns.scatterplot(x=x_val, y=y_val, s=size, color=color, edgecolor='none', label=description, zorder=zorder, ax=self.ax)
 
 
-    def _on_key(self, event):
-        if self._get_current() is None: return
+    def _on_key(self, event: Event) -> None:
+        """
+        Handle keyboard input to navigate cells, toggle representative mode, or confirm trojans.
+        Expects a KeyEvent
 
-        if event.key == "right":
-            self.i += 1
-        elif event.key == "left":
-            self.i -= 1
+        Args:
+            event (Event): The key event triggered by matplotlib.
+        """
+        if self._get_current() is None or not hasattr(event, 'key'): return
+        else: event = cast(KeyEvent, event)
+
+        allowed = ["left","right", "up", "down", "p", "m", "a", "d"]
+        if event.key not in allowed: return
+        elif event.key == "left" or event.key == "right":
+            self.i += 1 - 2*(event.key == "left")
         elif event.key == "up" or event.key == "down":
             self.rep_mode = not self.rep_mode
+        elif event.key == "p" or event.key == "m":
+            self.zoom += 0.1 - 0.2*(event.key == "p")
         elif event.key == "a" or event.key == "d":
             self._confirm_trojan(event.key == "a")
         
         self._show_current()
 
 
-    def start_interactive(self):
+    def start_interactive(self) -> None:
+        """
+        Start the interactive inspection session.
+
+        Connects keyboard events to the inspector.
+        Keyboard controls:
+        - left / right: navigate between cells
+        - up / down: toggle representative mode
+        - p / m: zoom in (plus) / zoom out (minus)
+        - a: confirm cell as trojan
+        - d: discard cell
+        """
         self.fig.canvas.mpl_connect('key_press_event', self._on_key)
         plt.show()
