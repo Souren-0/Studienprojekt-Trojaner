@@ -165,3 +165,22 @@ def jaccard(points1: Sequence[tuple[float, float]], points2: Sequence[tuple[floa
     disks2 = unary_union([Point(x, y).buffer(radius) for x, y in points2])
     
     return 1 - (disks1.intersection(disks2).area / disks1.union(disks2).area)
+
+
+def directed_jaccard(points1: Sequence[tuple[float, float]], points2: Sequence[tuple[float, float]], radius: float) -> float:
+    """
+    Compute the directed Jaccard from `points1` to `points2` using disks of a given radius.
+    This way, outliers of `points1` are mostly ignored because only the disks of `points2` need to be "filled".
+
+    Args:
+        points1 (Sequence[tuple[float, float]]): First point set.
+        points2 (Sequence[tuple[float, float]]): Second point set.
+        radius (float): Radius of disks around points.
+
+    Returns:
+        float: 1 minus the Jaccard index (distance-like measure).
+    """
+    disks1 = unary_union([Point(x, y).buffer(radius) for x, y in points1])
+    disks2 = unary_union([Point(x, y).buffer(radius) for x, y in points2])
+
+    return 1 - (disks1.intersection(disks2).area / disks2.area)
