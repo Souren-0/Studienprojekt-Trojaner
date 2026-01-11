@@ -60,6 +60,12 @@ class DataCache:
 
         self.data_path = data_path
         self.cache_dir = Path("./data_cache") / data_path.stem
+
+        if not self.cache_dir.exists():
+            warnings.warn(
+                "Cache directory created for the first time. "
+                "You may want to call 'update_all()' to populate caches."
+            )
         self.cache_dir.mkdir(parents=True, exist_ok=True)
 
         start = time.perf_counter()
@@ -78,10 +84,8 @@ class DataCache:
         start = time.perf_counter()
         self.update_sorted_cells()
         self.update_boxes()
-        self.update_representatives(list(self.get_sorted_cells().keys()), cell_num=100)
+        self.update_representatives(list(self.get_sorted_cells().keys()))
         self.update_aligned_cells(list(self.get_sorted_cells().keys()))
-        warnings.warn("Used cell_num=100 for quicker update. Consider treating these representatives as a draft. \n" \
-            "Update representatives with higher cell_num for better accuracies.", UserWarning)
         print(f"Total update took {time.perf_counter() - start:.4f} seconds")
 
     def update_sorted_cells(self) -> None:
@@ -196,7 +200,7 @@ class DataCache:
         self._cache_aligned_cells(aligned_cells)
         print(f"Updating done. Took {time.perf_counter() - start:.4f} seconds")
     
-    def save_confirmed_trojans(self, trojans: dict[tuple[int | float, int | float], list[Predicted_Cell]]) -> None:
+    def save_trojans(self, trojans: dict[tuple[int | float, int | float], list[Predicted_Cell]]) -> None:
         """
         Caches cells that were confirmed to be trojans after manual check for a specific box width range.
         These cells can later be retrieved using `get_confirmed_trojans`.
@@ -204,13 +208,13 @@ class DataCache:
         Args:
             trojans (dict[tuple[int | float, int | float], list[Predicted_Cell]]): Confirmed cells with their actual and predicted label
         """
-        current_trojans = self.get_confirmed_trojans()
+        current_trojans = self.get_trojans()
         current_trojans.update(trojans)
         path = self.cache_dir / "trojans.pickle"
         with open(path, "wb") as f:
             pickle.dump(current_trojans, f)
     
-    def get_confirmed_trojans(self) -> dict[tuple[int | float, int | float], list[Predicted_Cell]]:
+    def get_trojans(self) -> dict[tuple[int | float, int | float], list[Predicted_Cell]]:
         """Retrieves previously stored confirmed trojans from the cache.
 
         Returns:
@@ -270,7 +274,8 @@ class DataCache:
         if path.exists():
             with open(path, "rb") as f:
                 return pickle.load(f)
-        warnings.warn(f"No data is cached. Call 'update_{name}()' to cache.", UserWarning)
+        warning = f"No data is cached. Call 'update_{name}()' to cache."
+        warnings.warn(warning, UserWarning)
         return {}
 
     def _retrieve_sorted_cells(self) -> dict[str, list[Cell]]:

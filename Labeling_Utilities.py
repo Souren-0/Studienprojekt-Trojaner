@@ -13,6 +13,7 @@ from scipy.stats import rayleigh
 from sklearn.cluster import KMeans
 from Alignment_Utilities import *
 from Annotation_Helpers import *
+from Distance_Measures import jaccard
 
 
 def find_representative_vias(
@@ -175,4 +176,41 @@ def predict_trojans(cells: list[Cell], dists: list[Optional[float]], representat
         actual = trojan["data"]["name"]
         if predicted != actual:
             ret.append(Predicted_Cell(cell=trojan, actual=actual, predicted=predicted))
+    return ret
+
+
+def prune_predicted_trojans(cells: list[Predicted_Cell], thr: int = 6) -> list[Predicted_Cell]:
+    def get_key(cell: Predicted_Cell) -> tuple[str, str]:
+        return (cell['actual'], cell['predicted'])
+    
+    confusion_counts: Counter[tuple[str, str]] = Counter()
+    for cell in cells:
+        confusion_counts[get_key(cell)] += 1
+    
+    ret: list[Predicted_Cell] = []
+    for cell in cells:
+        if confusion_counts[get_key(cell)] <= thr: ret.append(cell)
+
+    return ret
+
+
+def confirm_predicted_trojans(cells: list[Predicted_Cell], dists: dict[str, list[float]], representatives: dict[str, list[Point]]) -> list[Predicted_Cell]:
+    def get_jaccard_radius(dists: list[float], thr: float = 0.5) -> float:
+            if len(dists) < 2: return 1
+            dists_np = np.array(dists)
+            dists_np[0] += np.finfo(float).eps # Avoids overflow warning when all distances are of equal value
+            loc, scale = rayleigh.fit(dists_np + np.finfo(float).eps) # Avoids divison by 0 when a distance is 0
+            return float(rayleigh.ppf(thr, loc=loc, scale=scale))
+    
+    ret: list[Predicted_Cell] = []
+    radii: dict[str, float] = {}
+    for cell in cells:
+        cell_vias = cell["cell"]["vias"]
+        actual_vias = align_vias(representatives[cell["actual"]], cell_vias)[0]
+        actual_radius = radii.setdefault(cell["actual"], get_jaccard_radius(dists[cell["actual"]]))
+        predicted_vias = align_vias(representatives[cell["predicted"]], cell_vias)[0]
+        predicted_radius = radii.setdefault(cell["predicted"], get_jaccard_radius(dists[cell["predicted"]]))
+        if jaccard(cell_vias, predicted_vias, predicted_radius) <= jaccard(cell_vias, actual_vias, actual_radius):
+            ret.append(cell)
+
     return ret
