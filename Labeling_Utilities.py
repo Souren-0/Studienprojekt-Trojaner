@@ -153,7 +153,7 @@ def filter_cells(cells: list[Cell], dists: list[Optional[float]], confidence_thr
     return list(cells_np[mask])
 
 
-def predict_trojans(cells: list[Cell], dists: list[Optional[float]], representatives: dict[str, list[Point]]) -> list[Predicted_Cell]:
+def predict_trojans(cells: list[Cell], dists: list[Optional[float]], representatives: dict[str, list[Point]], bias_strength: float = 0.5) -> list[Predicted_Cell]:
     """
     Predict potential trojan cells by combining distance-based filtering
     and representative-based reclassification.
@@ -172,7 +172,7 @@ def predict_trojans(cells: list[Cell], dists: list[Optional[float]], representat
     ret = []
     possible_trojans = filter_cells(cells, dists, 0.9)
     for trojan in tqdm(possible_trojans):
-        predicted = assign_cell_type(trojan, representatives)
+        predicted = assign_cell_type(trojan, representatives, bias_strength=bias_strength)
         actual = trojan["data"]["name"]
         if predicted != actual:
             ret.append(Predicted_Cell(cell=trojan, actual=actual, predicted=predicted))
@@ -196,11 +196,11 @@ def prune_predicted_trojans(cells: list[Predicted_Cell], thr: int = 6) -> list[P
 
 def confirm_predicted_trojans(cells: list[Predicted_Cell], dists: dict[str, list[float]], representatives: dict[str, list[Point]]) -> list[Predicted_Cell]:
     def get_jaccard_radius(dists: list[float], thr: float = 0.5) -> float:
-            if len(dists) < 2: return 1
+            if not dists: return 1
             dists_np = np.array(dists)
             dists_np[0] += np.finfo(float).eps # Avoids overflow warning when all distances are of equal value
             loc, scale = rayleigh.fit(dists_np + np.finfo(float).eps) # Avoids divison by 0 when a distance is 0
-            return float(rayleigh.ppf(thr, loc=loc, scale=scale))
+            return max(1, float(rayleigh.ppf(thr, loc=loc, scale=scale)))
     
     ret: list[Predicted_Cell] = []
     radii: dict[str, float] = {}

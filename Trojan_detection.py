@@ -198,7 +198,7 @@ def start_trojan_scan(sorted_cells, aligned_cells, representatives, boxes, cache
             cells.extend(c)
             dists.extend(d)
         print(f"Scanning boxsize {width} ({i}/{len(groups)})\nThere are {len(group)} different types in this group.")
-        possible_trojans = predict_trojans(cells, dists, group_representatives)
+        possible_trojans = predict_trojans(cells, dists, group_representatives, 0.4)
         possible_trojans = prune_predicted_trojans(possible_trojans)
         possible_trojans = confirm_predicted_trojans(possible_trojans, distances, representatives)
         trojans[width] = possible_trojans
@@ -240,20 +240,20 @@ Total Boxes: {len(boxes)}
 Total Representatives: {len(representatives)}
 Total aligned cells: {len(aligned_cells)}""")
 
-    # start_trojan_scan(sorted_cells, aligned_cells, representatives, boxes, cache)
+    start_trojan_scan(sorted_cells, aligned_cells, representatives, boxes, cache)
     all_trojans = cache.get_trojans()
 
     # all_trojans = read_trojans("trojans_65nm.pickle")
 
     # # For each width range show how many cells were predicted as trojans
-    # total = 0
-    # for w, trojans in all_trojans.items():
-    #     n = len(trojans)
-    #     if not n: continue
-    #     print(f"{str(w):<15}: {len(trojans)}")
-    #     for trojan in trojans: print(f"    {trojan['actual']} -> {trojan['predicted']}")
-    #     total += len(trojans)
-    # print(f"In total: {total} predicted trojans")
+    total = 0
+    for w, trojans in all_trojans.items():
+        n = len(trojans)
+        if not n: continue
+        print(f"{str(w):<15}: {len(trojans)}")
+        for trojan in trojans: print(f"    {trojan['actual']} -> {trojan['predicted']}")
+        total += len(trojans)
+    print(f"In total: {total} predicted trojans")
 
     # For each width range start inspecting trojans if there are any
     # After inspection confirmed trojans are updated in the cache
