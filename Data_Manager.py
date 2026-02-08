@@ -10,7 +10,7 @@ import time
 import pickle
 import warnings
 from pathlib import Path
-from Cell_Via_Utilities import reset_transform
+from Cell_Via_Utilities import reset_transform, rotate_cell_180
 from Alignment_Utilities import align_cells
 from Labeling_Utilities import find_representative_vias
 from Annotation_Helpers import *
@@ -39,12 +39,12 @@ class DataCache:
         aligned_cells (dict[str, tuple[list[Cell], list[Optional[float]]]]): Aligned cells and optional alignment errors.
     """
 
-    def __init__(self, data_path: Path) -> None:
+    def __init__(self, data_info: dict[str, Any]) -> None:
         """
         Initialize a DataCache for the given dataset path.
 
         Args:
-            data_path (Path): Path to the raw chip dataset pickle file.
+            data_info (dict[str, Any]): Information about the data (e.g. path to the raw chip dataset pickle file).
 
         Raises:
             FileNotFoundError: If `data_path` does not exist.
@@ -55,11 +55,13 @@ class DataCache:
               or initializes empty caches if missing.
             - Prints the time taken to retrieve all caches.
         """
-        if (not data_path.exists()):
-            raise FileNotFoundError(f"Data path does not exist: {data_path}")
+        self.data_info = data_info
 
-        self.data_path = data_path
-        self.cache_dir = Path("./data_cache") / data_path.stem
+        self.data_path = self.data_info["path"]
+        if (not self.data_path.exists()):
+            raise FileNotFoundError(f"Data path does not exist: {self.data_path}")
+
+        self.cache_dir = Path("./data_cache") / self.data_path.stem
 
         if not self.cache_dir.exists():
             warnings.warn(
@@ -104,7 +106,12 @@ class DataCache:
 
         sorted_cells: dict[str, list[Cell]] = defaultdict(list)
         for cell in all_cells:
-            sorted_cells[cell["data"]["name"]].append(reset_transform(cell))
+            new_cell = cell
+            if self.data_info['name'] == "65nm" or self.data_info['name'] == "90nm":
+                if new_cell['data']['reflection']:
+                    new_cell = rotate_cell_180(new_cell)
+            new_cell = reset_transform(new_cell)
+            sorted_cells[cell["data"]["name"]].append(new_cell)
         
         self._cache_sorted_cells(sorted_cells)
         print(f"Updating done. Took {time.perf_counter() - start:.4f} seconds")
