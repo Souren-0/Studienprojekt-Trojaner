@@ -13,8 +13,8 @@ from Alignment_Utilities import align_cells
 from Distance_Measures import *
 
 DATASETS = {
-"28nm_chip" : {"path" : Path("./Data/Chip_Data_28nm.pickle")},
-"65nm_chip" : {"path" : Path("./Data/Chip_Data_65nm.pickle")}
+    "28nm_chip" : {"name": "28nm", "path" : Path("./Data/Chip_Data_28nm.pickle")},
+    "65nm_chip" : {"name": "65nm", "path" : Path("./Data/Chip_Data_65nm.pickle")}
 }
 
 
@@ -179,7 +179,7 @@ def distance_distribution_own_label(aligned_cells, cell_types, threshold):
     plt.show()
 
 
-def start_trojan_scan(sorted_cells, aligned_cells, representatives, boxes, cache: DataCache):
+def start_trojan_scan(aligned_cells, representatives, boxes, cache: DataCache):
     groups = group_by_boxsize(boxes, w_gap=15, h_gap=15)
     
     distances = {}
@@ -215,21 +215,23 @@ def read_trojans(path):
     return trojans
 
 
-if __name__ == "__main__":
-    dataset = "65nm_chip"
-    chip_data_file = DATASETS[dataset]["path"]
-    cache = DataCache(chip_data_file)
+def refill_cache(cache, dataset="65nm"):
+    cache.update_sorted_cells()
+    cache.group_cells(get_mapping(dataset=dataset))
+    sorted_cells = cache.get_sorted_cells()
+    cell_types = list(sorted_cells.keys())
+    cache.update_boxes()
+    cache.update_representatives(cell_types, reset=True)
+    cache.update_aligned_cells(cell_types, reset=True)
 
-    # cache.update_sorted_cells()
-    # cache.group_cells(get_mapping("65nm"))
+
+if __name__ == "__main__":
+    dataset = DATASETS["65nm_chip"]
+    cache = DataCache(dataset)
+    # refill_cache(cache, dataset['name'])
 
     sorted_cells = cache.get_sorted_cells()
     cell_types = list(sorted_cells.keys())
-
-    # cache.update_boxes()
-    # cache.update_representatives(cell_types, reset=True)
-    # cache.update_aligned_cells(cell_types, reset=True)
-
     boxes = cache.get_boxes()
     aligned_cells = cache.get_aligned_cells()
     representatives = cache.get_representatives()
@@ -239,34 +241,43 @@ f"""Cell types: {len(sorted_cells)}
 Total Boxes: {len(boxes)}
 Total Representatives: {len(representatives)}
 Total aligned cells: {len(aligned_cells)}""")
+    
+    # print(data_overview(sorted_cells)[:20])
+    cell_type = "WO"
+    cells = aligned_cells[cell_type][0]
+    # cells = [(rotate_cell_180(cell) if cell['data']['reflection'] else cell) for cell in cells]
+    # cells = [cell for cell in cells if not cell['data']['reflection']]
+    v = Visualizer(cells[:1000], representatives[cell_type])
+    v.display_all()
 
-    start_trojan_scan(sorted_cells, aligned_cells, representatives, boxes, cache)
-    all_trojans = cache.get_trojans()
+    # Trojan scan:
+    # start_trojan_scan(sorted_cells, aligned_cells, representatives, boxes, cache)
+    # all_trojans = cache.get_trojans()
 
-    # all_trojans = read_trojans("trojans_65nm.pickle")
+    # # all_trojans = read_trojans("trojans_65nm.pickle")
 
     # # For each width range show how many cells were predicted as trojans
-    total = 0
-    for w, trojans in all_trojans.items():
-        n = len(trojans)
-        if not n: continue
-        print(f"{str(w):<15}: {len(trojans)}")
-        for trojan in trojans: print(f"    {trojan['actual']} -> {trojan['predicted']}")
-        total += len(trojans)
-    print(f"In total: {total} predicted trojans")
+    # total = 0
+    # for w, trojans in all_trojans.items():
+    #     n = len(trojans)
+    #     if not n: continue
+    #     print(f"{str(w):<15}: {len(trojans)}")
+    #     for trojan in trojans: print(f"    {trojan['actual']} -> {trojan['predicted']}")
+    #     total += len(trojans)
+    # print(f"In total: {total} predicted trojans")
 
-    # For each width range start inspecting trojans if there are any
-    # After inspection confirmed trojans are updated in the cache
-    for w, trojans in all_trojans.items():
-        if not trojans: continue
-        confirmed: list[Predicted_Cell] = []
-        inspector = Cell_Inspector(trojans, confirmed, representatives, chamfer)
-        inspector.start_interactive()
-        all_trojans[w] = confirmed
-    # cache.save_trojans(all_trojans)
+    # # For each width range start inspecting trojans if there are any
+    # # After inspection confirmed trojans are updated in the cache
+    # for w, trojans in all_trojans.items():
+    #     if not trojans: continue
+    #     confirmed: list[Predicted_Cell] = []
+    #     inspector = Cell_Inspector(trojans, confirmed, representatives, chamfer)
+    #     inspector.start_interactive()
+    #     all_trojans[w] = confirmed
+    # # cache.save_trojans(all_trojans)
 
 # Notes:
-# Original: 372
+# Original (28nm): 372
 # Pruning: 85
 # Confirming: 223 (directed)
 # Confirming: 200 (undirected)

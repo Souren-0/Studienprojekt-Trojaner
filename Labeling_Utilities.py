@@ -17,7 +17,7 @@ from Distance_Measures import jaccard
 
 
 def find_representative_vias(
-        cells: Iterable[Cell],
+        cells: list[Cell],
         num_cells : int = 1000,
         alignment_itr : int = 50,
         filter_itr: int = 2,
@@ -32,7 +32,7 @@ def find_representative_vias(
     outliers based on a Rayleigh-distributed distance model.
 
     Args:
-        cells (Iterable[Cell]): Cells of the same type.
+        cells (list[Cell]): Cells of the same type.
         num_cells (int): Maximum number of cells to use for alignment.
         alignment_itr (int): Iterations used during via alignment.
         filter_itr (int): Number of outlier-filtering iterations.

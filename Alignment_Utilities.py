@@ -195,7 +195,7 @@ def align_cells(
 
 
 def get_aligned_vias(
-        cells: Iterable[Cell],
+        cells: list[Cell],
         num_cells: Optional[int] = 100,
         alignment_itr: Optional[int] = 5,
         multiprocess: bool = False
@@ -208,7 +208,7 @@ def get_aligned_vias(
     to it and aggregated.
 
     Args:
-        cells (Iterable[Cell]): Collection of cells of the same type.
+        cells (list[Cell]): Collection of cells of the same type.
         num_cells (Optional[int]): Maximum number of cells to use for alignment.
         alignment_itr (Optional[int]): Iterations passed to the alignment routine.
         multiprocess (bool): Whether to parallelize alignment across processes.
@@ -219,7 +219,7 @@ def get_aligned_vias(
     if not cells: raise ValueError("Cells cannot be empty. Please provide cells to align.")
 
     # Transform all the cells to the same orientation
-    cells = [reset_transform(c, "y") for c in cells]
+    cells = deepcopy(list(cells))
     cell_type = cells[0]["data"]["name"]
 
     # Majority vote on the number of vias in the cell
