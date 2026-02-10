@@ -153,7 +153,12 @@ def filter_cells(cells: list[Cell], dists: list[Optional[float]], confidence_thr
     return list(cells_np[mask])
 
 
-def predict_trojans(cells: list[Cell], dists: list[Optional[float]], representatives: dict[str, list[Point]], bias_strength: float = 0.5) -> list[Predicted_Cell]:
+def predict_trojans(
+        cells: list[Cell],
+        dists: list[Optional[float]],
+        representatives: dict[str, list[Point]],
+        bias_strength: float = 0.5,
+        filter_strength=0.9) -> list[Predicted_Cell]:
     """
     Predict potential trojan cells by combining distance-based filtering
     and representative-based reclassification.
@@ -170,9 +175,9 @@ def predict_trojans(cells: list[Cell], dists: list[Optional[float]], representat
         list[Predicted_Cell]: Cells predicted to be trojans with labels.
     """
     ret = []
-    possible_trojans = filter_cells(cells, dists, 0.9)
+    possible_trojans = filter_cells(cells, dists, filter_strength)
     for trojan in tqdm(possible_trojans):
-        predicted = assign_cell_type(trojan, representatives, bias_strength=bias_strength)
+        predicted = assign_cell_type(trojan, representatives, bias_strength)
         actual = trojan["data"]["name"]
         if predicted != actual:
             ret.append(Predicted_Cell(cell=trojan, actual=actual, predicted=predicted))
