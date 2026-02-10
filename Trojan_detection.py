@@ -4,42 +4,11 @@ import pandas as pd
 from pprint import pprint
 from Data_Manager import *
 from collections import Counter
-from scipy.stats import rayleigh
-from matplotlib import pyplot as plt
 from Visualizer import Visualizer
 from Cell_Inspector import Cell_Inspector
 from Labeling_Utilities import predict_trojans, prune_predicted_trojans, confirm_predicted_trojans
-from Alignment_Utilities import align_cells
+from Alignment_Utilities import sample
 from Distance_Measures import *
-
-DATASETS = {
-    "28nm_chip" : {"name": "28nm", "path" : Path("./Data/Chip_Data_28nm.pickle")},
-    "65nm_chip" : {"name": "65nm", "path" : Path("./Data/Chip_Data_65nm.pickle")}
-}
-
-
-def check_efficiency(function, args):
-    start = time.perf_counter()
-    ret = function(*args)
-    print(f"Time: {time.perf_counter() - start :.4f} seconds.")
-    return ret
-
-
-def alignment_test(cell_type="BLS", sorted_cells=[], representatives=[]):
-    aligned, dists = check_efficiency(align_cells, (sorted_cells[cell_type], representatives[cell_type]))
-    dists = np.array(dists)
-    print("min:", dists.min())
-    print("max:", dists.max())
-    print("mean:", dists.mean())
-    print("median:", np.median(dists))
-    print(f"Top 10: {np.sort(dists)[-10:]}")
-    v = Visualizer(aligned[:1000], representatives[cell_type])
-    v.display_all()
-    plt.plot(dists)
-    plt.xlabel("Distance")
-    plt.ylabel("Count")
-    plt.title("Distribution of distances")
-    plt.show()
 
 
 def data_overview(sorted_cells):
@@ -58,52 +27,28 @@ def data_overview(sorted_cells):
     return df
 
 
-def show_boxsize_distribution(boxes):
-    widths = defaultdict(int)
-    heights = defaultdict(int)
-
-    for (width, height) in boxes.values():
-        widths[width] += 1
-        heights[height] += 1
-
-    plt.figure()
-    plt.bar(widths.keys(), widths.values()) # type: ignore
-    plt.title("Width distribution")
-    plt.xlabel("Width")
-    plt.ylabel("Count")
-    plt.show()
-
-    plt.figure()
-    plt.bar(heights.keys(), heights.values()) # type: ignore
-    plt.title("Height distribution")
-    plt.xlabel("Height")
-    plt.ylabel("Count")
-    plt.show()
-
-
-def group_boxsizes(boxes, w_gap=5, h_gap=5):
-    widths, heights = map(sorted, map(list, map(set, zip(*boxes.values()))))
-
-    width_ranges = []
-    w_start = widths[0]
-    for i in range(len(widths) - 1):
-        if widths[i+1] - widths[i] > w_gap:
-            width_ranges.append((w_start, widths[i]))
-            w_start = widths[i+1]
-    width_ranges.append((w_start, widths[-1]))
-
-    height_ranges = []
-    h_start = heights[0]
-    for i in range(len(heights) - 1):
-        if heights[i+1] - heights[i] > h_gap:
-            height_ranges.append((h_start, heights[i]))
-            h_start = heights[i+1]
-    height_ranges.append((h_start, heights[-1]))
-
-    return width_ranges, height_ranges
-
-
 def group_by_boxsize(boxes, w_gap=5, h_gap=5):
+    def group_boxsizes(boxes, w_gap=5, h_gap=5):
+        widths, heights = map(sorted, map(list, map(set, zip(*boxes.values()))))
+
+        width_ranges = []
+        w_start = widths[0]
+        for i in range(len(widths) - 1):
+            if widths[i+1] - widths[i] > w_gap:
+                width_ranges.append((w_start, widths[i]))
+                w_start = widths[i+1]
+        width_ranges.append((w_start, widths[-1]))
+
+        height_ranges = []
+        h_start = heights[0]
+        for i in range(len(heights) - 1):
+            if heights[i+1] - heights[i] > h_gap:
+                height_ranges.append((h_start, heights[i]))
+                h_start = heights[i+1]
+        height_ranges.append((h_start, heights[-1]))
+
+        return width_ranges, height_ranges
+    
     widths, heights = group_boxsizes(boxes, w_gap, h_gap)
     grouped = defaultdict(list)
     for cell_type, (width, height) in boxes.items():
@@ -115,71 +60,80 @@ def group_by_boxsize(boxes, w_gap=5, h_gap=5):
     return grouped
 
 
-def group_by_width(sorted_cells, boxes):
-    grouped = group_by_boxsize(boxes)
+def show_alignment_example(sorted_cells, aligned_cells, representatives, sample_num=1000, example_num=0):
+    if not sorted_cells:
+        print("No example can be shown. Did you forget to fill the cache?")
+        return
+    
+    cell_type = data_overview(sorted_cells).iloc[
+        min(example_num, len(sorted_cells) - 1)
+    ]['type']
 
-    rows = []
-    for (w, h), types in grouped.items():
-        total_vias = 0
-        for t in types:
-            cells = sorted_cells[t]
-            majority = Counter(len(c["vias"]) for c in cells).most_common(1)[0][0]
-            total_vias += len(cells) * majority
+    if cell_type not in representatives:
+        print(f"Representative for the cell type \"{cell_type}\" is not present.")
+        representative = None
+    else: representative = representatives[cell_type]
 
-        rows.append({
-            "Width": w,
-            "Height": h,
-            "Types_amount": len(types),
-            "Types": types,
-            "Total_vias": total_vias
-        })
+    if cell_type not in aligned_cells:
+        print(f"The cell type \"{cell_type}\" was not aligned yet. Considering unaligned cells.")
+        cells = sorted_cells[cell_type]
+    else: cells = aligned_cells[cell_type][0]
 
-    df = pd.DataFrame(rows).sort_values("Total_vias", ascending=False)
-    return df
-
-
-def get_cell_type_info(df, cell_types):
-    return df[df['type'].isin(cell_types)]
+    print(f"There are {len(cells)} cells of type \"{cell_type}\". Showing {sample_num} random cells...")
+    v = Visualizer(sample(cells, sample_num), representative)
+    v.display_all()
 
 
-def get_mapping(dataset="28nm"):
-    with open("./Data/Cell_Mapping.pickle", "rb") as f:
+def show_trojan_predictions(trojans, cache=None):
+    for w, trojans in all_trojans.items():
+        if not trojans: continue
+        confirmed = []
+        inspector = Cell_Inspector(trojans, confirmed, representatives, chamfer)
+        inspector.start_interactive()
+        all_trojans[w] = confirmed
+    if cache: cache.save_trojans(all_trojans)
+
+
+def trojan_prediction_summary(trojans):
+    print("Trojan summary" if trojans else "No trojans present. Did you run a trojan scan?")
+    total = 0
+    for w, trojan_set in trojans.items():
+        n = len(trojan_set)
+        if not n: continue
+
+        print(f"{str(w):<15}: {n}")
+        for trojan in trojan_set: print(f"    {trojan['actual']} -> {trojan['predicted']}")
+        total += n
+    print(f"In total: {total} predicted trojans")
+
+
+def read_trojans(path):
+    with open(path, "rb") as f:
+        trojans = pickle.load(f)
+    return trojans
+
+
+def get_mapping(dataset="28nm", path="./Data/Cell_Mapping.pickle"):
+    if not Path(path).exists:
+        print("Cell types could not be grouped.")
+        return {}
+    
+    with open(path, "rb") as f:
         data = pickle.load(f)
     return data[dataset]
 
 
-def plot_distance_distributions(dists_list, threshold=2):
-    for dists in dists_list:
-        d = np.array([x for x in dists if x is not None])
-        if len(d) < threshold:
-            continue
-        params = rayleigh.fit(d)
-        x = np.linspace(0, d.max(), 200)
-        y = rayleigh.pdf(x, *params)
-        plt.plot(x, y)
-
-    plt.xlabel("Distance")
-    plt.ylabel("Density")
-    plt.title("Rayleigh Distributions")
-    plt.show()
+def bool_prompt(msg,
+        accepting=["y", "ye", "yea", "yeah", "yes", "yep", "yup", "10-4", "roger", "affirmative", "1"],
+        rejecting=["n", "no", "nop", "nope", "nah", "never", "negative", "cancel", "abort", "stop", "0"]):
+    input_str = input(msg + " (y/n): ")
+    valid_input = accepting + rejecting
+    while input_str.lower() not in valid_input:
+        input_str = input("Invalid input. Please try again: ")
+    return input_str in accepting
 
 
-def distance_distribution_own_label(aligned_cells, cell_types, threshold):
-    for cell_type in cell_types:
-        _, dists = aligned_cells[cell_type]
-        dists = [dist for dist in dists if dist is not None]
-        if len(dists) > threshold:
-            x = np.linspace(0, max(dists), 100)
-            params = rayleigh.fit(dists)
-            pdf = rayleigh.pdf(x, *params)
-            plt.plot(x, pdf, label=cell_type)
-    plt.xlabel("Distance")
-    plt.ylabel("Density")
-    plt.legend()
-    plt.show()
-
-
-def start_trojan_scan(aligned_cells, representatives, boxes, cache: DataCache):
+def start_trojan_scan(aligned_cells, representatives, boxes, cache: DataCache, bias_strength=0.5, safe_cell_thr=0.9):
     groups = group_by_boxsize(boxes, w_gap=15, h_gap=15)
     
     distances = {}
@@ -198,7 +152,7 @@ def start_trojan_scan(aligned_cells, representatives, boxes, cache: DataCache):
             cells.extend(c)
             dists.extend(d)
         print(f"Scanning boxsize {width} ({i}/{len(groups)})\nThere are {len(group)} different types in this group.")
-        possible_trojans = predict_trojans(cells, dists, group_representatives, 0.4)
+        possible_trojans = predict_trojans(cells, dists, group_representatives, bias_strength)
         possible_trojans = prune_predicted_trojans(possible_trojans)
         possible_trojans = confirm_predicted_trojans(possible_trojans, distances, representatives)
         trojans[width] = possible_trojans
@@ -209,15 +163,9 @@ def start_trojan_scan(aligned_cells, representatives, boxes, cache: DataCache):
     print(f"Scanning took {time.perf_counter() - start :.4f} seconds.")
 
 
-def read_trojans(path):
-    with open(path, "rb") as f:
-        trojans = pickle.load(f)
-    return trojans
-
-
-def refill_cache(cache, dataset="65nm"):
+def fill_cache(cache):
     cache.update_sorted_cells()
-    cache.group_cells(get_mapping(dataset=dataset))
+    cache.group_cells(get_mapping(cache.data_info["name"]))
     sorted_cells = cache.get_sorted_cells()
     cell_types = list(sorted_cells.keys())
     cache.update_boxes()
@@ -225,10 +173,23 @@ def refill_cache(cache, dataset="65nm"):
     cache.update_aligned_cells(cell_types, reset=True)
 
 
+DATASETS = {
+    "28nm_chip" : {"name": "28nm", "path" : Path("./Data/type_bins_new_vias_28nm.pickle")},
+    "40nm_chip" : {"name": "40nm", "path" : Path("./Data/type_bins_new_vias_40nm.pickle")},
+    "65nm_chip" : {"name": "65nm", "path" : Path("./Data/type_bins_new_vias_65nm.pickle")},
+    "90nm_chip" : {"name": "90nm", "path" : Path("./Data/type_bins_new_vias_90nm.pickle")}
+}
+
+
+FULL_PROGRAM = False
 if __name__ == "__main__":
-    dataset = DATASETS["65nm_chip"]
+    if FULL_PROGRAM: start = time.perf_counter()
+
+    dataset = DATASETS["28nm_chip"]
     cache = DataCache(dataset)
-    # refill_cache(cache, dataset['name'])
+
+    if FULL_PROGRAM or bool_prompt("Do you want to fill the cache?"):
+        fill_cache(cache)
 
     sorted_cells = cache.get_sorted_cells()
     cell_types = list(sorted_cells.keys())
@@ -236,49 +197,23 @@ if __name__ == "__main__":
     aligned_cells = cache.get_aligned_cells()
     representatives = cache.get_representatives()
 
-    print(
-f"""Cell types: {len(sorted_cells)}
-Total Boxes: {len(boxes)}
-Total Representatives: {len(representatives)}
-Total aligned cells: {len(aligned_cells)}""")
+    print(f"Cache content summary:\n\
+    Total Cell types: {len(sorted_cells)}\n\
+    Total Boxes: {len(boxes)}\n\
+    Total Representatives: {len(representatives)}\n\
+    Total aligned cells: {len(aligned_cells)}")
     
-    # print(data_overview(sorted_cells)[:20])
-    cell_type = "WO"
-    cells = aligned_cells[cell_type][0]
-    # cells = [(rotate_cell_180(cell) if cell['data']['reflection'] else cell) for cell in cells]
-    # cells = [cell for cell in cells if not cell['data']['reflection']]
-    v = Visualizer(cells[:1000], representatives[cell_type])
-    v.display_all()
+    if not FULL_PROGRAM:
+        show_alignment_example(sorted_cells, aligned_cells, representatives, example_num=0)
+    if FULL_PROGRAM or bool_prompt("Run Trojan scan?"):
+        start_trojan_scan(aligned_cells, representatives, boxes, cache)
+    print("Trojan scan completed.")
+    
+    all_trojans = cache.get_trojans()
+    # all_trojans = read_trojans("trojans_28nm_new.pickle")
+    trojan_prediction_summary(all_trojans)
 
-    # Trojan scan:
-    # start_trojan_scan(sorted_cells, aligned_cells, representatives, boxes, cache)
-    # all_trojans = cache.get_trojans()
+    if FULL_PROGRAM: print(f"Total time: {time.perf_counter() - start :.4f} seconds.") #type: ignore
 
-    # # all_trojans = read_trojans("trojans_65nm.pickle")
-
-    # # For each width range show how many cells were predicted as trojans
-    # total = 0
-    # for w, trojans in all_trojans.items():
-    #     n = len(trojans)
-    #     if not n: continue
-    #     print(f"{str(w):<15}: {len(trojans)}")
-    #     for trojan in trojans: print(f"    {trojan['actual']} -> {trojan['predicted']}")
-    #     total += len(trojans)
-    # print(f"In total: {total} predicted trojans")
-
-    # # For each width range start inspecting trojans if there are any
-    # # After inspection confirmed trojans are updated in the cache
-    # for w, trojans in all_trojans.items():
-    #     if not trojans: continue
-    #     confirmed: list[Predicted_Cell] = []
-    #     inspector = Cell_Inspector(trojans, confirmed, representatives, chamfer)
-    #     inspector.start_interactive()
-    #     all_trojans[w] = confirmed
-    # # cache.save_trojans(all_trojans)
-
-# Notes:
-# Original (28nm): 372
-# Pruning: 85
-# Confirming: 223 (directed)
-# Confirming: 200 (undirected)
-# Pruning + Confirming: 36
+    if FULL_PROGRAM or bool_prompt("Inspect predictions?"):
+        show_trojan_predictions(all_trojans)
