@@ -1,5 +1,6 @@
 """
-Module: Visualizer <br>
+Module: Visualizer
+
 Author: Souren Ishkhanian
 
 This module helps visualizing cells by plotting their vias in their box.

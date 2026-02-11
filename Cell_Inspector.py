@@ -1,5 +1,6 @@
 """
-Module: Cell_Inspector <br>
+Module: Cell Inspector
+
 Author: Souren Ishkhanian
 
 This module helps manually checking for trojans.

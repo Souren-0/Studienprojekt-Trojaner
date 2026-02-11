@@ -1,5 +1,6 @@
 """
-Module: Representative & Classification Utilities <br>
+Module: Representative & Labeling Utilities
+
 Authors: Souren Ishkhanian and Kolja Dorschel
 
 This module provides utilities for computing representative (idealized) via
@@ -185,6 +186,20 @@ def predict_trojans(
 
 
 def prune_predicted_trojans(cells: list[Predicted_Cell], thr: int = 6) -> list[Predicted_Cell]:
+    """Remove predicted Trojan cells that appear too frequently for a given type pair.
+
+    Counts the occurrences of each (actual, predicted) pair in `cells`. Any cell
+    whose pair occurs more than `thr` times is discarded. This helps reduce
+    overrepresented false positives in predictions.
+
+    Args:
+        cells (list[Predicted_Cell]): List of predicted Trojan cells.
+        thr (int, optional): Maximum allowed occurrences of each (actual, predicted)
+            pair. Defaults to 6.
+
+    Returns:
+        pruned (list[Predicted_Cell]): Filtered list of predicted Trojan cells.
+    """
     def get_key(cell: Predicted_Cell) -> tuple[str, str]:
         return (cell['actual'], cell['predicted'])
     
@@ -199,7 +214,26 @@ def prune_predicted_trojans(cells: list[Predicted_Cell], thr: int = 6) -> list[P
     return ret
 
 
-def confirm_predicted_trojans(cells: list[Predicted_Cell], dists: dict[str, list[float]], representatives: dict[str, list[Point]]) -> list[Predicted_Cell]:
+def confirm_predicted_trojans(
+        cells: list[Predicted_Cell],
+        dists: dict[str, list[float]],
+        representatives: dict[str, list[Point]]
+    ) -> list[Predicted_Cell]:
+    """Filter predicted Trojan cells by comparing Jaccard similarity to actual cells.
+
+    For each predicted Trojan cell, the function computes Jaccard similarity
+    between the predicted and actual cell via patterns using a radius derived
+    from observed distances. A cell is confirmed as a Trojan if its similarity
+    to the predicted type is less than or equal to that with the actual type.
+
+    Args:
+        cells (list[Predicted_Cell]): List of predicted Trojan cells to verify.
+        dists (dict[str, list[float]]): Mapping from cell type to alignment distances.
+        representatives (dict[str, list[Point]]): Representative via points for each cell type.
+
+    Returns:
+        confirmed (list[Predicted_Cell]): Subset of `cells` that are confirmed as Trojans.
+    """
     def get_jaccard_radius(dists: list[float], thr: float = 0.5) -> float:
             if not dists: return 1
             dists_np = np.array(dists)

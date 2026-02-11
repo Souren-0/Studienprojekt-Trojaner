@@ -1,5 +1,6 @@
 """
-Module: Distance Measures <br>
+Module: Distance Measures
+
 Author: Souren Ishkhanian
 
 This module contains the following distance measures between point clouds:

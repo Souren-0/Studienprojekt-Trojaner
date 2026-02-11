@@ -1,5 +1,6 @@
 """
-Module: Data Manager <br>
+Module: Data Manager
+
 Author: Souren Ishkhanian
 
 As the chip dataset is large, and redunant computations - such as sorting cells or computing representatives - is costly, this module computes
@@ -10,12 +11,12 @@ import time
 import pickle
 import warnings
 from pathlib import Path
-from Cell_Via_Utilities import reset_transform, rotate_cell_180
-from Alignment_Utilities import align_cells
-from Labeling_Utilities import find_representative_vias
-from Annotation_Helpers import *
 from multiprocessing import Pool
 from collections import Counter, defaultdict
+from Alignment_Utilities import align_cells
+from Labeling_Utilities import find_representative_vias
+from Cell_Via_Utilities import reset_transform, rotate_cell_180
+from Annotation_Helpers import *
 
 class DataCache:
     """
@@ -107,9 +108,9 @@ class DataCache:
         sorted_cells: dict[str, list[Cell]] = defaultdict(list)
         for cell in all_cells:
             new_cell = cell
-            if self.data_info['name'] == "65nm" or self.data_info['name'] == "90nm":
-                if new_cell['data']['reflection']:
-                    new_cell = rotate_cell_180(new_cell)
+            # if self.data_info['name'] == "65nm" or self.data_info['name'] == "90nm":
+            #     if new_cell['data']['reflection']:
+            #         new_cell = rotate_cell_180(new_cell)
             new_cell = reset_transform(new_cell)
             sorted_cells[cell["data"]["name"]].append(new_cell)
         

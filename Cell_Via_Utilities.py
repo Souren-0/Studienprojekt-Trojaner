@@ -1,6 +1,8 @@
 """
-Module: Cell Via Utilities <br>
-Author: Kolja Dorschel <br>
+Module: Cell Via Utilities
+
+Author: Kolja Dorschel
+
 Modified by: Souren Ishkhanian
 
 This module contains functions for manipulating and aligning cell structures, including rotation, reflection, distance calculations, and via alignment.

@@ -1,5 +1,6 @@
 """
-Module: Alignment Utilities <br>
+Module: Alignment Utilities
+
 Author: Souren Ishkhanian and Kolja Dorschel
 
 This module provides useful alignment methods for cells and their vias.
