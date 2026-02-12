@@ -1,0 +1,7 @@
+Alignment\_Utilities module
+===========================
+
+.. automodule:: Alignment_Utilities
+   :members:
+   :show-inheritance:
+   :undoc-members:
