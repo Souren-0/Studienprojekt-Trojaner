@@ -1,0 +1,11 @@
+# Ignore everything
+/*
+
+# Except docs/build
+!docs/
+docs/*
+!docs/build/
+docs/build/*
+!docs/build/html
+
+!.gitignore
