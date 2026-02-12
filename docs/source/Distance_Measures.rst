@@ -1,0 +1,7 @@
+Distance\_Measures module
+=========================
+
+.. automodule:: Distance_Measures
+   :members:
+   :show-inheritance:
+   :undoc-members:

@@ -1,0 +1,7 @@
+Cell\_Inspector module
+======================
+
+.. automodule:: Cell_Inspector
+   :members:
+   :show-inheritance:
+   :undoc-members:
