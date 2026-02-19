@@ -105,14 +105,13 @@ class DataCache:
         for tile in tile_list:
             all_cells += chip_data[tile]
 
+        powerline_x = ["65nm", "90nm"]
         sorted_cells: dict[str, list[Cell]] = defaultdict(list)
         for cell in all_cells:
-            new_cell = cell
-            # if self.data_info['name'] == "65nm" or self.data_info['name'] == "90nm":
-            #     if new_cell['data']['reflection']:
-            #         new_cell = rotate_cell_180(new_cell)
-            new_cell = reset_transform(new_cell)
-            sorted_cells[cell["data"]["name"]].append(new_cell)
+            cell = reset_transform(cell,
+                powerline_direction="x" if self.data_info['name'] in powerline_x else "y"
+            )
+            sorted_cells[cell["data"]["name"]].append(cell)
         
         self._cache_sorted_cells(sorted_cells)
         print(f"Updating done. Took {time.perf_counter() - start:.4f} seconds")
