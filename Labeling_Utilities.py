@@ -10,7 +10,7 @@ cells (e.g. hardware trojans) based on statistical confidence.
 """
 
 import numpy as np
-from scipy.stats import rayleigh
+from scipy.stats import loglaplace, rayleigh
 from sklearn.cluster import KMeans
 from Alignment_Utilities import *
 from Annotation_Helpers import *
@@ -148,9 +148,9 @@ def filter_cells(cells: list[Cell], dists: list[Optional[float]], confidence_thr
     cells_np, dists_np = np.array(cells_np), (np.array(dists_np) + np.finfo(float).eps) # type: ignore
     dists_np[0] += np.finfo(float).eps # type: ignore
 
-    loc, scale = rayleigh.fit(dists_np)
+    params = loglaplace.fit(dists_np)
 
-    mask = dists_np > rayleigh.ppf(confidence_threshold, loc=loc, scale=scale)
+    mask = dists_np > loglaplace.ppf(confidence_threshold, *params)
     return list(cells_np[mask])
 
 
