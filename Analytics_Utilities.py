@@ -10,12 +10,43 @@ and is not directly related to Trojan analysis.
 
 import time
 import numpy as np
+import pandas as pd
+from scipy import stats
 from Visualizer import Visualizer
 from matplotlib import pyplot as plt
-from collections import defaultdict
-from scipy.stats import rayleigh
+from collections import Counter, defaultdict
 from Alignment_Utilities import align_cells
 from Annotation_Helpers import *
+pd.set_option('display.max_rows', None)
+
+
+def data_overview(sorted_cells: dict[str, list[Cell]]) -> pd.DataFrame:
+    """Return an overview of sorted cells as a table with the following columns:
+    - type: Cell type name
+    - amount: Number of cells of this type
+    - vias: Most common via count per cell for this type
+    - total_vias: amount times vias
+
+    Args:
+        sorted_cells (dict[str, list[Cell]]):
+            Mapping from cell type to all available cells of that type.
+
+    Returns:
+        overview (pd.DataFrame): Summary table with one row per cell type.
+    """
+    rows = []
+    for cell_type, cells in sorted_cells.items():
+        cell_vias = [len(cell["vias"]) for cell in cells]
+        majority_vias = Counter(cell_vias).most_common(1)[0][0] if cells else 0
+        rows.append({
+            "type": cell_type,
+            "amount": len(cells),
+            "vias": majority_vias,
+            "total_vias" : len(cells) * majority_vias
+        })
+    df = pd.DataFrame(rows)
+    df = df.sort_values("total_vias", ascending=False)
+    return df
 
 
 def check_efficiency(function: Callable[..., Any], args: tuple[Any, ...]) -> Any:
@@ -124,9 +155,9 @@ def plot_distance_distributions(
         d = np.array([x for x in dists if x is not None])
         if len(d) < threshold:
             continue
-        params = rayleigh.fit(d)
+        params = stats.rayleigh.fit(d)
         x = np.linspace(0, d.max(), 200)
-        y = rayleigh.pdf(x, *params)
+        y = stats.rayleigh.pdf(x, *params)
         plt.plot(x, y)
 
     plt.xlabel("Distance")
@@ -157,10 +188,52 @@ def distance_distribution_own_label(
         valid_dists = [dist for dist in dists if dist is not None]
         if len(valid_dists) > threshold:
             x = np.linspace(0, max(valid_dists), 100)
-            params = rayleigh.fit(valid_dists)
-            pdf = rayleigh.pdf(x, *params)
+            params = stats.rayleigh.fit(valid_dists)
+            pdf = stats.rayleigh.pdf(x, *params)
             plt.plot(x, pdf, label=cell_type)
     plt.xlabel("Distance")
     plt.ylabel("Density")
+    plt.legend()
+    plt.show()
+
+
+def fit_comparison(sorted_cells, aligned_cells, row, dists_list, percents=[85,90,95]):
+    """
+    Plot and compare fitted probability distributions against empirical distance data.
+
+    For the cell type selected by `row` in `sorted_cells`, this function extracts
+    alignment distances, fits multiple SciPy distributions, overlays their PDFs,
+    and marks selected upper-percentile cutoffs.
+
+    Args:
+        sorted_cells:
+            Output used by `data_overview`; selects the cell type via `row`.
+        aligned_cells:
+            Mapping from cell type to (cells, distances), where distances may contain None.
+        row:
+            Row index into `data_overview(sorted_cells)` identifying the cell type.
+        dists_list:
+            Iterable of (name, scipy.stats distribution) pairs
+            (e.g. [("F", stats.f), ("Log-Laplace", stats.loglaplace)]).
+        percents:
+            Percentiles (0–100) for which vertical cutoff lines are drawn.
+    """
+    print("Plotting distributions of distances for")
+    print(data_overview(sorted_cells).iloc[row])
+    cell_type = data_overview(sorted_cells).iloc[row]['type']
+    _, dists = aligned_cells[cell_type]
+    x = np.array([d for d in dists if d is not None])
+    xs = np.linspace(x.min(), x.max(), 10000)
+
+    plt.hist(x, bins=500, density=True, alpha=0.35, label="Data")
+
+    for dist_name, dist_func in dists_list:
+        params = dist_func.fit(x)
+        line, = plt.plot(xs, dist_func.pdf(xs, *params), label=f"{dist_name} fit")
+        for p in percents:
+            q = dist_func.ppf(p/100, *params)
+            ls = "-" if p==max(percents) else "--" if p==90 else ":"
+            plt.axvline(q, color=line.get_color(), lw=1, ls=ls, label=f"{dist_name} {p}%")
+
     plt.legend()
     plt.show()
