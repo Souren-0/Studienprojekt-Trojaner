@@ -9,44 +9,14 @@ prediction, pruning, and interactive confirmation. The module also includes util
 for visualizing distributions, inspecting alignments, and summarizing predictions.
 """
 
-import pandas as pd
 from Data_Manager import *
 from Distance_Measures import *
-from collections import Counter
 from Visualizer import Visualizer
 from Cell_Inspector import Cell_Inspector
 from collections import defaultdict, Counter
-from Alignment_Utilities import sample
+from Analytics_Utilities import data_overview
+from Alignment_Utilities import align_vias, sample
 from Labeling_Utilities import predict_trojans, prune_predicted_trojans, confirm_predicted_trojans
-
-
-def data_overview(sorted_cells: dict[str, list[Cell]]) -> pd.DataFrame:
-    """Return an overview of sorted cells as a table with the following columns:
-    - type: Cell type name
-    - amount: Number of cells of this type
-    - vias: Most common via count per cell for this type
-    - total_vias: amount times vias
-
-    Args:
-        sorted_cells (dict[str, list[Cell]]):
-            Mapping from cell type to all available cells of that type.
-
-    Returns:
-        overview (pd.DataFrame): Summary table with one row per cell type.
-    """
-    rows = []
-    for cell_type, cells in sorted_cells.items():
-        cell_vias = [len(cell["vias"]) for cell in cells]
-        majority_vias = Counter(cell_vias).most_common(1)[0][0] if cells else 0
-        rows.append({
-            "type": cell_type,
-            "amount": len(cells),
-            "vias": majority_vias,
-            "total_vias" : len(cells) * majority_vias
-        })
-    df = pd.DataFrame(rows)
-    df = df.sort_values("total_vias", ascending=False)
-    return df
 
 
 def group_by_boxsize(
@@ -134,9 +104,7 @@ def show_alignment_example(
         print("No example can be shown. Did you forget to fill the cache?")
         return
     
-    cell_type = data_overview(sorted_cells).iloc[
-        min(example_num, len(sorted_cells) - 1)
-    ]['type']
+    cell_type = data_overview(sorted_cells).iloc[example_num % len(sorted_cells)]['type']
 
     if cell_type not in representatives:
         print(f"Representative for the cell type \"{cell_type}\" is not present.")
@@ -180,6 +148,32 @@ def show_trojan_predictions(
         inspector.start_interactive()
         all_trojans[w] = confirmed
     if cache: cache.save_trojans(all_trojans)
+
+
+def show_trojans_with_piority(
+        all_trojans: dict[tuple[int | float, int | float], list[Predicted_Cell]],
+        reps: dict[str, list[tuple[int | float, int | float]]]
+    ) -> None:
+    """Interactively inspect and confirm predicted Trojan cells.
+
+    All trojans across all widths are shown in a sorted order,
+    where the highest "actual-predicted-distance-ratio" is used as priotity measure.
+
+    Args:
+        all_trojans (dict[tuple[int | float, int | float], list[Predicted_Cell]]):
+            Mapping from box size to predicted Trojan cells.
+        representatives (dict[str, list[tuple[int | float, int | float]]]):
+            Representative vias for each cell type.
+    """
+    trojans = [trojan for trojans in all_trojans.values() for trojan in trojans]
+    trojans.sort(
+        key=lambda x: (
+            chamfer(align_vias(x["cell"]["vias"], reps[x["actual"]])[0], reps[x["actual"]]) /
+            chamfer(align_vias(x["cell"]["vias"], reps[x["predicted"]])[0], reps[x["predicted"]])
+        ), reverse=True
+    )
+    inspector = Cell_Inspector(trojans, [], representatives, chamfer)
+    inspector.start_interactive()
 
 
 def trojan_prediction_summary(
@@ -404,9 +398,6 @@ DATASETS = {
 # Change accordingly
 CELL_GROUPS_PATH = "./Data/Cell_Groups.pickle"
 
-# Set true if you want to skip intermediate prompts/checks
-# Full program includes:
-# - 
 FULL_PROGRAM = True
 """
 Set to `True` if you want to skip intermediate prompts/checks
@@ -417,7 +408,7 @@ Full program includes:
 - All steps of trojan scan (prediction -> pruning -> confirming)
 """
 
-DATASET = DATASETS["40nm_chip"]
+DATASET = DATASETS["90nm_chip"]
 
 if __name__ == "__main__":
     if FULL_PROGRAM:
@@ -440,18 +431,21 @@ if __name__ == "__main__":
     Total Boxes: {len(boxes)}\n\
     Total Representatives: {len(representatives)}\n\
     Total aligned cells: {len(aligned_cells)}")
-    
+
     if not FULL_PROGRAM:
-        show_alignment_example(sorted_cells, aligned_cells, representatives, example_num=0)
+        i = 0
+        while bool_prompt(f"Would you like to see {"an" if i == 0 else "another"} example of a cell alignment?"):
+            show_alignment_example(sorted_cells, aligned_cells, representatives, example_num=i)
+            i += 1
     if FULL_PROGRAM or bool_prompt("Run Trojan scan?"):
-        start_trojan_scan(aligned_cells, representatives, boxes, cache)
+        start_trojan_scan(aligned_cells, representatives, boxes, cache, safe_cell_thr=0.8)
     print("Trojan scan completed.")
     
     all_trojans = cache.get_trojans()
-    # all_trojans = read_trojans("trojans_28nm_new.pickle")
+    # all_trojans = read_trojans("trojans_65nm_10_02_2026.pickle")
     trojan_prediction_summary(all_trojans)
 
     if FULL_PROGRAM: print(f"Total time: {time.perf_counter() - start :.4f} seconds.") #type: ignore
 
     if FULL_PROGRAM or bool_prompt("Inspect predictions?"):
-        show_trojan_predictions(all_trojans, representatives)
+        show_trojans_with_piority(all_trojans, representatives)
